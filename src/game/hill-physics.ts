@@ -1,4 +1,15 @@
-export function hillTerrainY(worldX: number): number {
+export function hillTerrainY(worldX: number, mapId = "rolling-meadows"): number {
+  if (mapId === "highlands") {
+    return (
+      126 +
+      Math.sin(worldX / 112) * 21 +
+      Math.sin(worldX / 44 + 0.5) * 8 +
+      Math.sin(worldX / 250 + 1.8) * 7
+    );
+  }
+  if (mapId === "long-climbs") {
+    return 126 + Math.sin(worldX / 285) * 25 + Math.sin(worldX / 105 + 1.1) * 7;
+  }
   return (
     126 +
     Math.sin(worldX / 160) * 17 +
@@ -7,7 +18,17 @@ export function hillTerrainY(worldX: number): number {
   );
 }
 
-export function hillTerrainDerivative(worldX: number): number {
+export function hillTerrainDerivative(worldX: number, mapId = "rolling-meadows"): number {
+  if (mapId === "highlands") {
+    return (
+      (Math.cos(worldX / 112) * 21) / 112 +
+      (Math.cos(worldX / 44 + 0.5) * 8) / 44 +
+      (Math.cos(worldX / 250 + 1.8) * 7) / 250
+    );
+  }
+  if (mapId === "long-climbs") {
+    return (Math.cos(worldX / 285) * 25) / 285 + (Math.cos(worldX / 105 + 1.1) * 7) / 105;
+  }
   return (
     (Math.cos(worldX / 160) * 17) / 160 +
     (Math.cos(worldX / 62 + 0.8) * 6) / 62 +
@@ -15,8 +36,8 @@ export function hillTerrainDerivative(worldX: number): number {
   );
 }
 
-export function hillGradePercent(worldX: number): number {
-  return Math.max(-14, Math.min(14, -hillTerrainDerivative(worldX) * 100));
+export function hillGradePercent(worldX: number, mapId = "rolling-meadows"): number {
+  return Math.max(-14, Math.min(14, -hillTerrainDerivative(worldX, mapId) * 100));
 }
 
 export function hillTargetSpeed(powerW: number, hardPowerW: number, gradePercent: number): number {

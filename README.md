@@ -36,8 +36,10 @@ The lower-left ride display shows active run time as minutes and seconds, with a
 - **Asteroids** replaces the landscape with a moving starfield. Dodge incoming asteroids by pedaling higher or easing lower as the field accelerates.
 - **Racer** is a fixed-screen overhead circuit inspired by classic arcade sprint racing. Steering is automatic; harder pedaling accelerates and moves toward the outer racing line, while easing slows and moves inward. Cars can pass through one another without collision penalties, keeping overtaking focused on speed.
 - **Hill Climber** is an endless procedurally generated side-scrolling landscape. Uphill grades require additional watts to hold speed. Downhills support coasting, and pedaling downhill produces a large speed boost.
+- **Submarine Dive** moves the altitude controls underwater. Pilot through coral seas, dark trenches, or arctic depths while avoiding mines, reefs, or a mixture of both.
+- **Dragon Flight** sends a pedal-powered dragon through fantasy skies. Thread rings over an emerald valley, volcanic peaks, or a moonlit kingdom using random, rolling, or alternating courses.
 
-Each level keeps a separate high score. The level catalog lives in `src/levels.ts`; gameplay-specific obstacle and backdrop behavior lives in the Phaser scene.
+Selecting any level opens a customization screen before its countdown. Every level offers map and Relaxed/Standard/Expert difficulty choices, plus mode-specific options. Disabling Ornithopter upper gates also enables a safe upper screen boundary, allowing sustained hard riding without a ceiling collision. Each unique combination has its own high score, so unlike configurations are never compared. The level catalog and option definitions live in `src/levels.ts`; gameplay-specific behavior lives in the Phaser scene. Additional level and platform ideas are tracked in [`docs/roadmap.md`](docs/roadmap.md).
 
 ### Guided traces
 

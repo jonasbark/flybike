@@ -1,7 +1,7 @@
 import Phaser from "phaser";
 import type { CalibrationProfile } from "../calibration";
 import { EffortMapper, TRAINER_VELOCITY_RESPONSE_MS, trainerAltitudeVelocity } from "../effort";
-import type { LevelId } from "../levels";
+import type { LevelId, LevelSettings } from "../levels";
 import { emitGameEvent, gameEvents } from "./events";
 import {
   hillGradePercent,
@@ -25,6 +25,18 @@ type AsteroidObstacle = {
   scored: boolean;
 };
 
+type SeaObstacle = {
+  body: Phaser.GameObjects.Container;
+  radius: number;
+  scored: boolean;
+};
+
+type DragonRing = {
+  body: Phaser.GameObjects.Arc;
+  radius: number;
+  resolved: boolean;
+};
+
 type RaceRival = {
   body: Phaser.GameObjects.Container;
   startProgress: number;
@@ -38,6 +50,7 @@ type StartRunDetail = {
   demo: boolean;
   mode: "game" | "trace";
   levelId: LevelId;
+  settings: LevelSettings;
 };
 
 type PauseRunDetail = {
@@ -58,21 +71,52 @@ const PLAYER_WIDTH = 66;
 const PLAYER_HEIGHT = 44;
 const PITCH_STEP = Phaser.Math.DegToRad(2);
 const HILL_PLAYER_X = 76;
-const TRACK_CONTROL_POINTS = [
-  { x: 55, y: 143 },
-  { x: 125, y: 148 },
-  { x: 171, y: 126 },
-  { x: 238, y: 143 },
-  { x: 286, y: 119 },
-  { x: 270, y: 78 },
-  { x: 221, y: 66 },
-  { x: 195, y: 33 },
-  { x: 130, y: 31 },
-  { x: 94, y: 55 },
-  { x: 45, y: 43 },
-  { x: 28, y: 83 },
-  { x: 38, y: 119 },
-] as const;
+const RACER_TRACKS = {
+  "meadow-circuit": [
+    { x: 55, y: 143 },
+    { x: 125, y: 148 },
+    { x: 171, y: 126 },
+    { x: 238, y: 143 },
+    { x: 286, y: 119 },
+    { x: 270, y: 78 },
+    { x: 221, y: 66 },
+    { x: 195, y: 33 },
+    { x: 130, y: 31 },
+    { x: 94, y: 55 },
+    { x: 45, y: 43 },
+    { x: 28, y: 83 },
+    { x: 38, y: 119 },
+  ],
+  "desert-circuit": [
+    { x: 48, y: 142 },
+    { x: 119, y: 146 },
+    { x: 157, y: 111 },
+    { x: 210, y: 147 },
+    { x: 279, y: 132 },
+    { x: 286, y: 86 },
+    { x: 245, y: 54 },
+    { x: 184, y: 65 },
+    { x: 151, y: 29 },
+    { x: 86, y: 34 },
+    { x: 43, y: 61 },
+    { x: 29, y: 104 },
+  ],
+  "night-circuit": [
+    { x: 49, y: 139 },
+    { x: 103, y: 151 },
+    { x: 149, y: 132 },
+    { x: 190, y: 153 },
+    { x: 266, y: 137 },
+    { x: 288, y: 101 },
+    { x: 260, y: 71 },
+    { x: 213, y: 82 },
+    { x: 190, y: 43 },
+    { x: 132, y: 27 },
+    { x: 79, y: 48 },
+    { x: 35, y: 42 },
+    { x: 24, y: 88 },
+  ],
+} as const;
 
 export class FlyScene extends Phaser.Scene {
   private player!: Phaser.GameObjects.Image;
@@ -81,17 +125,32 @@ export class FlyScene extends Phaser.Scene {
   private spaceBackdrop!: Phaser.GameObjects.Container;
   private racerBackdrop!: Phaser.GameObjects.Container;
   private hillBackdrop!: Phaser.GameObjects.Container;
+  private submarineBackdrop!: Phaser.GameObjects.Container;
+  private dragonBackdrop!: Phaser.GameObjects.Container;
+  private skyMapOverlay!: Phaser.GameObjects.Rectangle;
+  private spaceMapOverlay!: Phaser.GameObjects.Rectangle;
+  private racerMapOverlay!: Phaser.GameObjects.Rectangle;
+  private racerTrack!: Phaser.GameObjects.Graphics;
+  private hillMapOverlay!: Phaser.GameObjects.Rectangle;
+  private submarineMapOverlay!: Phaser.GameObjects.Rectangle;
+  private dragonMapOverlay!: Phaser.GameObjects.Rectangle;
   private clouds: Phaser.GameObjects.Ellipse[] = [];
   private skyParallaxLayers: Array<{ container: Phaser.GameObjects.Container; speed: number }> = [];
   private stars: Phaser.GameObjects.Rectangle[] = [];
+  private bubbles: Phaser.GameObjects.Arc[] = [];
+  private dragonClouds: Phaser.GameObjects.Ellipse[] = [];
   private racerPlayer!: Phaser.GameObjects.Container;
   private hillPlayer!: Phaser.GameObjects.Container;
+  private submarinePlayer!: Phaser.GameObjects.Container;
+  private dragonPlayer!: Phaser.GameObjects.Container;
   private hillFarTerrain!: Phaser.GameObjects.Graphics;
   private hillMidTerrain!: Phaser.GameObjects.Graphics;
   private hillGround!: Phaser.GameObjects.Graphics;
   private raceRivals: RaceRival[] = [];
   private obstacles: ObstaclePair[] = [];
   private asteroids: AsteroidObstacle[] = [];
+  private seaObstacles: SeaObstacle[] = [];
+  private dragonRings: DragonRing[] = [];
   private mapper?: EffortMapper;
   private powerW = 0;
   private lastTelemetryAt = 0;
@@ -108,6 +167,11 @@ export class FlyScene extends Phaser.Scene {
   private lastTrajectoryAt = 0;
   private trainerRun = false;
   private levelId: LevelId = "ornithopter-run";
+  private levelSettings: LevelSettings = {
+    mapId: "village-sky",
+    difficulty: "standard",
+    optionId: "random",
+  };
   private racerProgress = 0;
   private racerSpeed = 0;
   private racerLane = 0;
@@ -142,6 +206,8 @@ export class FlyScene extends Phaser.Scene {
     this.player.setOrigin(0.5);
     this.createRaceCars();
     this.createHillBike();
+    this.createSubmarine();
+    this.createDragon();
     this.setBackdrop("ornithopter-run");
 
     gameEvents.addEventListener("start-run", this.onStartRun);
@@ -177,10 +243,22 @@ export class FlyScene extends Phaser.Scene {
     const velocityEase = 1 - Math.exp(-delta / this.velocityResponseMs);
     this.velocityY += (targetVelocity - this.velocityY) * velocityEase;
     this.rawPlayerY += this.velocityY * dt;
+    if (
+      this.levelId === "ornithopter-run" &&
+      this.levelSettings.modifierId === "upper-off" &&
+      this.rawPlayerY < 10
+    ) {
+      this.rawPlayerY = 10;
+      this.velocityY = Math.max(0, this.velocityY);
+    }
     this.player.y =
       this.mode === "trace" ? Phaser.Math.Clamp(this.rawPlayerY, 10, HEIGHT - 20) : this.rawPlayerY;
     const targetPitch = Phaser.Math.Clamp(this.velocityY / 500, -0.25, 0.25);
     this.player.rotation = Math.round(targetPitch / PITCH_STEP) * PITCH_STEP;
+    if (this.levelId === "submarine-dive")
+      this.submarinePlayer.setPosition(PLAYER_X, this.player.y).setRotation(this.player.rotation);
+    if (this.levelId === "dragon-flight")
+      this.dragonPlayer.setPosition(PLAYER_X, this.player.y).setRotation(this.player.rotation);
     this.shadow.scaleX = Phaser.Math.Clamp(1.25 - this.player.y / HEIGHT, 0.35, 1);
     this.shadow.alpha = Phaser.Math.Clamp(this.player.y / HEIGHT / 4, 0.05, 0.2);
 
@@ -200,19 +278,25 @@ export class FlyScene extends Phaser.Scene {
 
     const difficulty = Math.min(1, this.elapsed / 90);
     if (this.levelId === "asteroids") this.updateAsteroids(difficulty, dt);
+    else if (this.levelId === "submarine-dive") this.updateSubmarine(difficulty, dt);
+    else if (this.levelId === "dragon-flight") this.updateDragon(difficulty, dt);
     else this.updateGates(difficulty, dt);
 
+    if (!this.running) return;
     if (!this.checkTelemetryHealth()) return;
     if (this.collides()) this.endRun();
   }
 
   private updateGates(difficulty: number, dt: number): void {
-    const speed = this.trainerRun
-      ? Phaser.Math.Linear(38, 60, difficulty)
-      : Phaser.Math.Linear(45, 76, difficulty);
-    const spawnEvery = this.trainerRun
-      ? Phaser.Math.Linear(2.45, 1.85, difficulty)
-      : Phaser.Math.Linear(2.15, 1.55, difficulty);
+    const settingMultiplier = this.difficultyMultiplier();
+    const speed =
+      (this.trainerRun
+        ? Phaser.Math.Linear(38, 60, difficulty)
+        : Phaser.Math.Linear(45, 76, difficulty)) * settingMultiplier;
+    const spawnEvery =
+      (this.trainerRun
+        ? Phaser.Math.Linear(2.45, 1.85, difficulty)
+        : Phaser.Math.Linear(2.15, 1.55, difficulty)) / settingMultiplier;
     if (this.spawnElapsed >= spawnEvery) {
       this.spawnGate(difficulty);
       this.spawnElapsed = 0;
@@ -229,12 +313,15 @@ export class FlyScene extends Phaser.Scene {
   }
 
   private updateAsteroids(difficulty: number, dt: number): void {
-    const speed = this.trainerRun
-      ? Phaser.Math.Linear(42, 70, difficulty)
-      : Phaser.Math.Linear(50, 88, difficulty);
-    const spawnEvery = this.trainerRun
-      ? Phaser.Math.Linear(2.05, 1.25, difficulty)
-      : Phaser.Math.Linear(1.8, 1.05, difficulty);
+    const settingMultiplier = this.difficultyMultiplier();
+    const speed =
+      (this.trainerRun
+        ? Phaser.Math.Linear(42, 70, difficulty)
+        : Phaser.Math.Linear(50, 88, difficulty)) * settingMultiplier;
+    const spawnEvery =
+      (this.trainerRun
+        ? Phaser.Math.Linear(2.05, 1.25, difficulty)
+        : Phaser.Math.Linear(1.8, 1.05, difficulty)) / settingMultiplier;
     if (this.spawnElapsed >= spawnEvery) {
       this.spawnAsteroid();
       this.spawnElapsed = 0;
@@ -251,13 +338,58 @@ export class FlyScene extends Phaser.Scene {
     this.removeOldAsteroids();
   }
 
+  private updateSubmarine(difficulty: number, dt: number): void {
+    const settingMultiplier = this.difficultyMultiplier();
+    const speed = Phaser.Math.Linear(35, 67, difficulty) * settingMultiplier;
+    const spawnEvery = Phaser.Math.Linear(2.35, 1.35, difficulty) / settingMultiplier;
+    if (this.spawnElapsed >= spawnEvery) {
+      this.spawnSeaObstacle();
+      this.spawnElapsed = 0;
+    }
+    for (const obstacle of this.seaObstacles) {
+      obstacle.body.x -= speed * dt;
+      obstacle.body.rotation += 0.18 * dt;
+      if (!obstacle.scored && obstacle.body.x + obstacle.radius < PLAYER_X) {
+        obstacle.scored = true;
+        this.incrementScore();
+      }
+    }
+    this.removeOldSeaObstacles();
+  }
+
+  private updateDragon(difficulty: number, dt: number): void {
+    const settingMultiplier = this.difficultyMultiplier();
+    const speed = Phaser.Math.Linear(40, 74, difficulty) * settingMultiplier;
+    const spawnEvery = Phaser.Math.Linear(2.6, 1.55, difficulty) / settingMultiplier;
+    if (this.spawnElapsed >= spawnEvery) {
+      this.spawnDragonRing(difficulty);
+      this.spawnElapsed = 0;
+    }
+    for (const ring of this.dragonRings) {
+      ring.body.x -= speed * dt;
+      if (!ring.resolved && ring.body.x <= PLAYER_X) {
+        ring.resolved = true;
+        const playerHalfHeight = this.trainerRun ? 7 : 9;
+        const passedThrough =
+          Math.abs(this.player.y - ring.body.y) + playerHalfHeight <= ring.radius - 4;
+        if (passedThrough) this.incrementScore();
+        else {
+          this.endRun();
+          return;
+        }
+      }
+    }
+    this.removeOldDragonRings();
+  }
+
   private updateRacer(dt: number): void {
     const normalizedEffort = Phaser.Math.Clamp(
       this.mapper!.getSmoothedPower() / this.racerHardPowerW,
       0,
       1,
     );
-    const targetSpeed = Phaser.Math.Linear(0.003, 0.062, normalizedEffort);
+    const targetSpeed =
+      Phaser.Math.Linear(0.003, 0.062, normalizedEffort) / this.difficultyMultiplier();
     const speedEase = 1 - Math.exp(-dt / (this.trainerRun ? 0.8 : 0.35));
     this.racerSpeed += (targetSpeed - this.racerSpeed) * speedEase;
     this.racerLane +=
@@ -271,7 +403,7 @@ export class FlyScene extends Phaser.Scene {
     }
     this.positionRaceCar(this.racerPlayer, this.racerProgress, this.racerLane);
 
-    for (const rival of this.raceRivals) {
+    for (const rival of this.raceRivals.slice(0, this.activeRivalCount())) {
       rival.progress += rival.speed * dt;
       this.positionRaceCar(rival.body, rival.progress, rival.lane);
     }
@@ -279,11 +411,11 @@ export class FlyScene extends Phaser.Scene {
 
   private updateHillClimber(dt: number): void {
     const worldX = this.hillDistance + HILL_PLAYER_X;
-    const gradePercent = hillGradePercent(worldX);
+    const gradePercent = hillGradePercent(worldX, this.levelSettings.mapId);
     const targetSpeed = hillTargetSpeed(
       this.mapper!.getSmoothedPower(),
       this.hillHardPowerW,
-      gradePercent,
+      gradePercent * this.difficultyMultiplier(),
     );
     const responseSeconds = this.trainerRun ? 0.85 : 0.4;
     this.hillSpeed += (targetSpeed - this.hillSpeed) * (1 - Math.exp(-dt / responseSeconds));
@@ -296,10 +428,10 @@ export class FlyScene extends Phaser.Scene {
     }
 
     const currentWorldX = this.hillDistance + HILL_PLAYER_X;
-    const currentGrade = hillGradePercent(currentWorldX);
-    const terrainAngle = Math.atan(hillTerrainDerivative(currentWorldX));
+    const currentGrade = hillGradePercent(currentWorldX, this.levelSettings.mapId);
+    const terrainAngle = Math.atan(hillTerrainDerivative(currentWorldX, this.levelSettings.mapId));
     this.hillPlayer
-      .setPosition(HILL_PLAYER_X, hillTerrainY(currentWorldX) - 6)
+      .setPosition(HILL_PLAYER_X, hillTerrainY(currentWorldX, this.levelSettings.mapId) - 6)
       .setRotation(terrainAngle);
     this.drawHillLandscape();
 
@@ -319,7 +451,9 @@ export class FlyScene extends Phaser.Scene {
 
     const surface: Phaser.Math.Vector2[] = [];
     for (let x = 0; x <= WIDTH; x += 4) {
-      surface.push(new Phaser.Math.Vector2(x, hillTerrainY(this.hillDistance + x)));
+      surface.push(
+        new Phaser.Math.Vector2(x, hillTerrainY(this.hillDistance + x, this.levelSettings.mapId)),
+      );
     }
     this.hillGround.clear();
     this.hillGround
@@ -335,7 +469,7 @@ export class FlyScene extends Phaser.Scene {
       const worldX = marker * 64 + 21;
       const x = worldX - this.hillDistance;
       if (x < 0 || x > WIDTH) continue;
-      const y = hillTerrainY(worldX) - 2;
+      const y = hillTerrainY(worldX, this.levelSettings.mapId) - 2;
       const flowerColor = marker % 3 === 0 ? 0xf4d35e : marker % 3 === 1 ? 0xf2eee2 : 0xd96c75;
       this.hillGround.lineBetween(x, y, x, y - 5);
       this.hillGround.fillStyle(flowerColor).fillCircle(x, y - 6, 1.5);
@@ -369,6 +503,18 @@ export class FlyScene extends Phaser.Scene {
   private incrementScore(): void {
     this.score += 1;
     emitGameEvent("score", this.score);
+  }
+
+  private difficultyMultiplier(): number {
+    if (this.levelSettings.difficulty === "relaxed") return 0.85;
+    if (this.levelSettings.difficulty === "expert") return 1.16;
+    return 1;
+  }
+
+  private activeRivalCount(): number {
+    if (this.levelSettings.optionId === "solo") return 0;
+    if (this.levelSettings.optionId === "pack") return 5;
+    return 3;
   }
 
   private createBackdrops(): void {
@@ -449,7 +595,15 @@ export class FlyScene extends Phaser.Scene {
       this.clouds.push(cloud);
       skyClouds.push(cloud);
     }
-    skyObjects.push(...skyClouds, farMountains, midMountains, nearHills, foreground);
+    this.skyMapOverlay = this.add.rectangle(160, 90, WIDTH, HEIGHT, 0xffffff, 0);
+    skyObjects.push(
+      ...skyClouds,
+      farMountains,
+      midMountains,
+      nearHills,
+      foreground,
+      this.skyMapOverlay,
+    );
     this.skyBackdrop = this.add.container(0, 0, skyObjects).setDepth(-10);
 
     const spaceObjects: Phaser.GameObjects.GameObject[] = [
@@ -470,34 +624,16 @@ export class FlyScene extends Phaser.Scene {
       this.stars.push(star);
       spaceObjects.push(star);
     }
+    this.spaceMapOverlay = this.add.rectangle(160, 90, WIDTH, HEIGHT, 0xffffff, 0);
+    spaceObjects.push(this.spaceMapOverlay);
     this.spaceBackdrop = this.add.container(0, 0, spaceObjects).setDepth(-10);
 
     const raceObjects: Phaser.GameObjects.GameObject[] = [
       this.add.rectangle(160, 90, 320, 180, 0x477342),
     ];
-    const track = this.add.graphics();
-    const trackPoints = Array.from({ length: 180 }, (_, index) => this.trackPoint(index / 180));
-    track.lineStyle(42, 0x263128, 0.95).strokePoints(trackPoints, true);
-    track.lineStyle(34, 0x77766f).strokePoints(trackPoints, true);
-    track.lineStyle(1, 0xd9cf9a, 0.5);
-    for (let index = 0; index < trackPoints.length; index += 10) {
-      const current = trackPoints[index]!;
-      const next = trackPoints[(index + 4) % trackPoints.length]!;
-      track.lineBetween(current.x, current.y, next.x, next.y);
-    }
-    for (let index = 0; index < 90; index += 3) {
-      const color = index % 6 === 0 ? 0xf2e5c4 : 0xb94d3c;
-      const outer = this.trackPose(index / 90, 17);
-      const inner = this.trackPose(index / 90, -17);
-      track.fillStyle(color).fillCircle(outer.x, outer.y, 1.7);
-      track.fillCircle(inner.x, inner.y, 1.7);
-    }
-    const finishInner = this.trackPose(0, -16);
-    const finishOuter = this.trackPose(0, 16);
-    track
-      .lineStyle(3, 0xf5eee0)
-      .lineBetween(finishInner.x, finishInner.y, finishOuter.x, finishOuter.y);
-    raceObjects.push(track);
+    this.racerTrack = this.add.graphics();
+    this.drawRacerTrack();
+    raceObjects.push(this.racerTrack);
     raceObjects.push(this.add.ellipse(150, 82, 42, 20, 0x345c52, 0.9));
     raceObjects.push(this.add.rectangle(148, 81, 34, 2, 0x8cb4a4, 0.45));
     const trees: Array<[number, number]> = [
@@ -511,6 +647,8 @@ export class FlyScene extends Phaser.Scene {
       raceObjects.push(this.add.circle(x, y, 5, 0x274f31));
       raceObjects.push(this.add.circle(x - 2, y - 2, 2, 0x5d8d4f));
     }
+    this.racerMapOverlay = this.add.rectangle(160, 90, WIDTH, HEIGHT, 0xffffff, 0);
+    raceObjects.push(this.racerMapOverlay);
     this.racerBackdrop = this.add.container(0, 0, raceObjects).setDepth(-10);
 
     this.hillFarTerrain = this.add.graphics();
@@ -527,8 +665,61 @@ export class FlyScene extends Phaser.Scene {
       this.hillMidTerrain,
       this.hillGround,
     ];
+    this.hillMapOverlay = this.add.rectangle(160, 90, WIDTH, HEIGHT, 0xffffff, 0);
+    hillObjects.push(this.hillMapOverlay);
     this.hillBackdrop = this.add.container(0, 0, hillObjects).setDepth(-10);
     this.drawHillLandscape();
+
+    const submarineObjects: Phaser.GameObjects.GameObject[] = [
+      this.add.rectangle(160, 30, WIDTH, 60, 0x287f9a),
+      this.add.rectangle(160, 95, WIDTH, 70, 0x15536f),
+      this.add.rectangle(160, 155, WIDTH, 50, 0x0b354d),
+      this.add.rectangle(160, 9, WIDTH, 3, 0x8dd7d5, 0.65),
+      this.add.triangle(65, 75, 0, 0, 24, 0, 70, 75, 0x9ee3dc, 0.08),
+      this.add.triangle(210, 88, 0, 0, 32, 0, 88, 88, 0x9ee3dc, 0.07),
+      this.add.rectangle(160, 173, WIDTH, 18, 0x806f55),
+    ];
+    for (let index = 0; index < 9; index += 1) {
+      const x = 12 + index * 39;
+      submarineObjects.push(this.add.triangle(x, 165, 0, 14, 5, 0, 10, 14, 0x397052));
+      submarineObjects.push(this.add.circle(x + 12, 169, 3 + (index % 3), 0xa55a58, 0.8));
+    }
+    for (let index = 0; index < 24; index += 1) {
+      const bubble = this.add.circle(
+        Phaser.Math.Between(0, WIDTH),
+        Phaser.Math.Between(18, HEIGHT - 20),
+        index % 5 === 0 ? 2 : 1,
+        0xbce8e4,
+        0.32,
+      );
+      bubble.setData("rise", 2 + (index % 4));
+      this.bubbles.push(bubble);
+      submarineObjects.push(bubble);
+    }
+    this.submarineMapOverlay = this.add.rectangle(160, 90, WIDTH, HEIGHT, 0xffffff, 0);
+    submarineObjects.push(this.submarineMapOverlay);
+    this.submarineBackdrop = this.add.container(0, 0, submarineObjects).setDepth(-10);
+
+    const dragonObjects: Phaser.GameObjects.GameObject[] = [
+      this.add.rectangle(160, 90, WIDTH, HEIGHT, 0x91bfd1),
+      this.add.circle(267, 29, 16, 0xffd67d, 0.9),
+      this.add.triangle(54, 164, 0, 62, 48, 0, 96, 62, 0x5d785d),
+      this.add.triangle(155, 166, 0, 75, 62, 0, 124, 75, 0x71835e),
+      this.add.triangle(266, 165, 0, 58, 49, 0, 98, 58, 0x526c58),
+      this.add.rectangle(160, 171, WIDTH, 18, 0x4d6947),
+      this.add.rectangle(277, 138, 20, 32, 0x675260),
+      this.add.rectangle(266, 143, 8, 23, 0x675260),
+      this.add.rectangle(288, 143, 8, 23, 0x675260),
+    ];
+    for (let index = 0; index < 7; index += 1) {
+      const cloud = this.add.ellipse(25 + index * 55, 29 + (index % 3) * 20, 38, 9, 0xf5ead4, 0.55);
+      cloud.setData("drift", 2 + (index % 3));
+      this.dragonClouds.push(cloud);
+      dragonObjects.push(cloud);
+    }
+    this.dragonMapOverlay = this.add.rectangle(160, 90, WIDTH, HEIGHT, 0xffffff, 0);
+    dragonObjects.push(this.dragonMapOverlay);
+    this.dragonBackdrop = this.add.container(0, 0, dragonObjects).setDepth(-10);
   }
 
   private createRaceCars(): void {
@@ -537,12 +728,39 @@ export class FlyScene extends Phaser.Scene {
       { progress: 0.2, lane: -8, speed: 0.032, color: 0xf0c74f },
       { progress: 0.48, lane: 0, speed: 0.036, color: 0x4c79c6 },
       { progress: 0.73, lane: 8, speed: 0.029, color: 0xe8e2cb },
+      { progress: 0.34, lane: 8, speed: 0.034, color: 0x9d5eb5 },
+      { progress: 0.86, lane: -8, speed: 0.031, color: 0x52a68a },
     ];
     this.raceRivals = rivals.map(({ color, ...rival }) => ({
       ...rival,
       startProgress: rival.progress,
       body: this.createRaceCar(color).setDepth(1),
     }));
+  }
+
+  private drawRacerTrack(): void {
+    const trackPoints = Array.from({ length: 180 }, (_, index) => this.trackPoint(index / 180));
+    this.racerTrack.clear();
+    this.racerTrack.lineStyle(42, 0x263128, 0.95).strokePoints(trackPoints, true);
+    this.racerTrack.lineStyle(34, 0x77766f).strokePoints(trackPoints, true);
+    this.racerTrack.lineStyle(1, 0xd9cf9a, 0.5);
+    for (let index = 0; index < trackPoints.length; index += 10) {
+      const current = trackPoints[index]!;
+      const next = trackPoints[(index + 4) % trackPoints.length]!;
+      this.racerTrack.lineBetween(current.x, current.y, next.x, next.y);
+    }
+    for (let index = 0; index < 90; index += 3) {
+      const color = index % 6 === 0 ? 0xf2e5c4 : 0xb94d3c;
+      const outer = this.trackPose(index / 90, 17);
+      const inner = this.trackPose(index / 90, -17);
+      this.racerTrack.fillStyle(color).fillCircle(outer.x, outer.y, 1.7);
+      this.racerTrack.fillCircle(inner.x, inner.y, 1.7);
+    }
+    const finishInner = this.trackPose(0, -16);
+    const finishOuter = this.trackPose(0, 16);
+    this.racerTrack
+      .lineStyle(3, 0xf5eee0)
+      .lineBetween(finishInner.x, finishInner.y, finishOuter.x, finishOuter.y);
   }
 
   private createHillBike(): void {
@@ -567,6 +785,46 @@ export class FlyScene extends Phaser.Scene {
     this.hillPlayer.setVisible(false);
   }
 
+  private createSubmarine(): void {
+    const hull = this.add.ellipse(0, 0, 34, 15, 0xd6a847).setStrokeStyle(2, 0x6c5332);
+    const tower = this.add.rectangle(-2, -9, 10, 6, 0xb98736).setStrokeStyle(1, 0x5b472f);
+    const periscope = this.add.rectangle(0, -14, 2, 7, 0x5b472f);
+    const fin = this.add.triangle(-18, 0, 0, 7, 0, 0, 7, 3, 0xb98736);
+    const propeller = this.add.rectangle(-21, 0, 2, 12, 0x7e6744);
+    const windows = [-8, 2, 11].map((x) =>
+      this.add.circle(x, 0, 2.2, 0x9be1df).setStrokeStyle(1, 0x4f6f71),
+    );
+    this.submarinePlayer = this.add.container(PLAYER_X, 88, [
+      fin,
+      propeller,
+      hull,
+      tower,
+      periscope,
+      ...windows,
+    ]);
+    this.submarinePlayer.setVisible(false);
+  }
+
+  private createDragon(): void {
+    const tail = this.add.triangle(-18, 2, 0, 4, 14, 0, 14, 8, 0x94484a);
+    const body = this.add.ellipse(-2, 0, 28, 13, 0xa84e4d).setStrokeStyle(1, 0x60332f);
+    const head = this.add.circle(13, -3, 6, 0xb95c4d).setStrokeStyle(1, 0x60332f);
+    const snout = this.add.rectangle(18, -1, 7, 4, 0xc36e51);
+    const upperWing = this.add.triangle(-5, -4, 0, 16, 9, 0, 20, 14, 0xd88b63, 0.9);
+    const lowerWing = this.add.triangle(-4, 4, 0, 0, 10, 14, 21, 1, 0x7f3942, 0.85);
+    const eye = this.add.circle(15, -5, 1, 0xffe795);
+    this.dragonPlayer = this.add.container(PLAYER_X, 88, [
+      tail,
+      lowerWing,
+      body,
+      upperWing,
+      head,
+      snout,
+      eye,
+    ]);
+    this.dragonPlayer.setVisible(false);
+  }
+
   private createRaceCar(color: number): Phaser.GameObjects.Container {
     const body = this.add.rectangle(0, 0, 13, 7, color).setStrokeStyle(1, 0x211d1a);
     const cabin = this.add.rectangle(-1, 0, 5, 5, 0xb8d4d0, 0.8);
@@ -579,14 +837,14 @@ export class FlyScene extends Phaser.Scene {
   }
 
   private trackPoint(progress: number): Phaser.Math.Vector2 {
+    const track =
+      RACER_TRACKS[this.levelSettings.mapId as keyof typeof RACER_TRACKS] ??
+      RACER_TRACKS["meadow-circuit"];
     const wrapped = ((progress % 1) + 1) % 1;
-    const scaled = wrapped * TRACK_CONTROL_POINTS.length;
+    const scaled = wrapped * track.length;
     const index = Math.floor(scaled);
     const t = scaled - index;
-    const point = (offset: number) =>
-      TRACK_CONTROL_POINTS[
-        (index + offset + TRACK_CONTROL_POINTS.length) % TRACK_CONTROL_POINTS.length
-      ]!;
+    const point = (offset: number) => track[(index + offset + track.length) % track.length]!;
     const p0 = point(-1);
     const p1 = point(0);
     const p2 = point(1);
@@ -632,27 +890,84 @@ export class FlyScene extends Phaser.Scene {
         if (star.x < -2) star.x = WIDTH + 2;
       }
     }
+    if (this.submarineBackdrop.visible) {
+      for (const bubble of this.bubbles) {
+        bubble.y -= (bubble.getData("rise") as number) * dt;
+        if (bubble.y < 12) bubble.y = HEIGHT - 14;
+      }
+    }
+    if (this.dragonBackdrop.visible) {
+      for (const cloud of this.dragonClouds) {
+        cloud.x -= (cloud.getData("drift") as number) * dt;
+        if (cloud.x < -22) cloud.x = WIDTH + 22;
+      }
+    }
   }
 
   private setBackdrop(levelId: LevelId): void {
     const inSpace = levelId === "asteroids";
     const onTrack = levelId === "racer";
     const inHills = levelId === "hill-climber";
-    this.skyBackdrop.setVisible(!inSpace && !onTrack && !inHills);
+    const underwater = levelId === "submarine-dive";
+    const dragonSky = levelId === "dragon-flight";
+    this.skyBackdrop.setVisible(!inSpace && !onTrack && !inHills && !underwater && !dragonSky);
     this.spaceBackdrop.setVisible(inSpace);
     this.racerBackdrop.setVisible(onTrack);
     this.hillBackdrop.setVisible(inHills);
-    this.shadow.setVisible(!inSpace && !onTrack && !inHills);
-    this.player.setVisible(!onTrack && !inHills);
+    this.submarineBackdrop.setVisible(underwater);
+    this.dragonBackdrop.setVisible(dragonSky);
+    this.shadow.setVisible(!inSpace && !onTrack && !inHills && !underwater && !dragonSky);
+    this.player.setVisible(!onTrack && !inHills && !underwater && !dragonSky);
     this.racerPlayer.setVisible(onTrack);
-    for (const rival of this.raceRivals) rival.body.setVisible(onTrack);
+    for (const [index, rival] of this.raceRivals.entries()) {
+      rival.body.setVisible(onTrack && index < this.activeRivalCount());
+    }
     this.hillPlayer.setVisible(inHills);
+    this.submarinePlayer.setVisible(underwater);
+    this.dragonPlayer.setVisible(dragonSky);
+  }
+
+  private applyMapTheme(): void {
+    this.skyMapOverlay.setFillStyle(0xffffff, 0);
+    this.spaceMapOverlay.setFillStyle(0xffffff, 0);
+    this.racerMapOverlay.setFillStyle(0xffffff, 0);
+    this.hillMapOverlay.setFillStyle(0xffffff, 0);
+    this.submarineMapOverlay.setFillStyle(0xffffff, 0);
+    this.dragonMapOverlay.setFillStyle(0xffffff, 0);
+    if (this.levelSettings.mapId === "sunset-range")
+      this.skyMapOverlay.setFillStyle(0xd76e4d, 0.28);
+    else if (this.levelSettings.mapId === "moonlit-peaks")
+      this.skyMapOverlay.setFillStyle(0x26305f, 0.42);
+    else if (this.levelSettings.mapId === "red-nebula")
+      this.spaceMapOverlay.setFillStyle(0x751f38, 0.35);
+    else if (this.levelSettings.mapId === "ice-nebula")
+      this.spaceMapOverlay.setFillStyle(0x254f78, 0.34);
+    else if (this.levelSettings.mapId === "desert-circuit")
+      this.racerMapOverlay.setFillStyle(0xc6904c, 0.3);
+    else if (this.levelSettings.mapId === "night-circuit")
+      this.racerMapOverlay.setFillStyle(0x18254d, 0.48);
+    else if (this.levelSettings.mapId === "highlands")
+      this.hillMapOverlay.setFillStyle(0x385765, 0.2);
+    else if (this.levelSettings.mapId === "long-climbs")
+      this.hillMapOverlay.setFillStyle(0xd49445, 0.18);
+    else if (this.levelSettings.mapId === "midnight-trench")
+      this.submarineMapOverlay.setFillStyle(0x101c4e, 0.46);
+    else if (this.levelSettings.mapId === "arctic-depths")
+      this.submarineMapOverlay.setFillStyle(0x8ad0dd, 0.22);
+    else if (this.levelSettings.mapId === "volcanic-sky")
+      this.dragonMapOverlay.setFillStyle(0xa63d2c, 0.35);
+    else if (this.levelSettings.mapId === "moon-kingdom")
+      this.dragonMapOverlay.setFillStyle(0x29305f, 0.46);
   }
 
   private readonly onStartRun = (event: Event): void => {
-    const { profile, demo, mode, levelId } = (event as CustomEvent<StartRunDetail>).detail;
+    const { profile, demo, mode, levelId, settings } = (event as CustomEvent<StartRunDetail>)
+      .detail;
     this.mode = mode;
     this.levelId = levelId;
+    this.levelSettings = settings;
+    this.applyMapTheme();
+    if (levelId === "racer") this.drawRacerTrack();
     this.trainerRun = !demo;
     this.mapper = new EffortMapper(
       profile,
@@ -667,6 +982,8 @@ export class FlyScene extends Phaser.Scene {
       .setPosition(PLAYER_X, 88)
       .setDisplaySize(PLAYER_WIDTH, PLAYER_HEIGHT)
       .setRotation(0);
+    this.submarinePlayer.setPosition(PLAYER_X, 88).setRotation(0).setAlpha(1);
+    this.dragonPlayer.setPosition(PLAYER_X, 88).setRotation(0).setAlpha(1);
     this.racerProgress = 0;
     this.racerSpeed = 0;
     this.racerLane = 0;
@@ -685,8 +1002,8 @@ export class FlyScene extends Phaser.Scene {
     this.hillPlayer.setAlpha(1);
     const hillWorldX = this.hillDistance + HILL_PLAYER_X;
     this.hillPlayer
-      .setPosition(HILL_PLAYER_X, hillTerrainY(hillWorldX) - 6)
-      .setRotation(Math.atan(hillTerrainDerivative(hillWorldX)));
+      .setPosition(HILL_PLAYER_X, hillTerrainY(hillWorldX, this.levelSettings.mapId) - 6)
+      .setRotation(Math.atan(hillTerrainDerivative(hillWorldX, this.levelSettings.mapId)));
     this.drawHillLandscape();
     this.setBackdrop(levelId);
     this.velocityY = 0;
@@ -740,13 +1057,29 @@ export class FlyScene extends Phaser.Scene {
   };
 
   private spawnGate(difficulty: number): void {
+    const difficultyGap =
+      this.levelSettings.difficulty === "relaxed"
+        ? 10
+        : this.levelSettings.difficulty === "expert"
+          ? -8
+          : 0;
     const gap = Math.round(
-      this.trainerRun
+      (this.trainerRun
         ? Phaser.Math.Linear(92, 68, difficulty)
-        : Phaser.Math.Linear(72, 52, difficulty),
+        : Phaser.Math.Linear(72, 52, difficulty)) + difficultyGap,
     );
     const margin = 18;
-    const gapY = Phaser.Math.Between(margin + gap / 2, HEIGHT - margin - gap / 2 - 18);
+    const minimumGapY = margin + gap / 2;
+    const maximumGapY = HEIGHT - margin - gap / 2 - 18;
+    const courseIndex = this.score + this.obstacles.length;
+    let gapY: number;
+    if (this.levelSettings.optionId === "rolling") {
+      gapY = Phaser.Math.Linear(minimumGapY, maximumGapY, (Math.sin(courseIndex * 0.82) + 1) / 2);
+    } else if (this.levelSettings.optionId === "alternating") {
+      gapY = courseIndex % 2 === 0 ? minimumGapY : maximumGapY;
+    } else {
+      gapY = Phaser.Math.Between(Math.ceil(minimumGapY), Math.floor(maximumGapY));
+    }
     const width = 20;
     const x = WIDTH + width;
     const topHeight = gapY - gap / 2;
@@ -754,17 +1087,30 @@ export class FlyScene extends Phaser.Scene {
     const bottomHeight = HEIGHT - bottomY;
     const color = 0x66513e;
     const capColor = 0xc19a5b;
+    const upperGateEnabled = this.levelSettings.modifierId !== "upper-off";
+    const top = this.add
+      .rectangle(x, topHeight / 2, width, topHeight, color)
+      .setVisible(upperGateEnabled);
+    const topCap = this.add
+      .rectangle(x, topHeight - 3, width + 7, 6, capColor)
+      .setVisible(upperGateEnabled);
     this.obstacles.push({
-      top: this.add.rectangle(x, topHeight / 2, width, topHeight, color),
+      top,
       bottom: this.add.rectangle(x, bottomY + bottomHeight / 2, width, bottomHeight, color),
-      topCap: this.add.rectangle(x, topHeight - 3, width + 7, 6, capColor),
+      topCap,
       bottomCap: this.add.rectangle(x, bottomY + 3, width + 7, 6, capColor),
       scored: false,
     });
   }
 
   private spawnAsteroid(): void {
-    const radius = Phaser.Math.Between(10, 19);
+    const [minimumRadius, maximumRadius] =
+      this.levelSettings.optionId === "small"
+        ? [8, 13]
+        : this.levelSettings.optionId === "large"
+          ? [15, 22]
+          : [10, 19];
+    const radius = Phaser.Math.Between(minimumRadius, maximumRadius);
     const rock = this.add
       .circle(0, 0, radius, Phaser.Math.RND.pick([0x6f6b76, 0x817768, 0x5f6672]))
       .setStrokeStyle(2, 0xb0a58e, 0.8);
@@ -803,6 +1149,80 @@ export class FlyScene extends Phaser.Scene {
     });
   }
 
+  private spawnSeaObstacle(): void {
+    const selectedType =
+      this.levelSettings.optionId === "mixed-sea"
+        ? Phaser.Math.RND.pick(["mines", "reefs"])
+        : this.levelSettings.optionId;
+    const isMine = selectedType !== "reefs";
+    const radius = isMine ? 10 : 14;
+    const pieces: Phaser.GameObjects.GameObject[] = [];
+    if (isMine) {
+      pieces.push(this.add.circle(0, 0, radius, 0x3d4850).setStrokeStyle(2, 0x89959a));
+      pieces.push(this.add.circle(-3, -2, 2, 0xaab4b2, 0.45));
+      for (let index = 0; index < 8; index += 1) {
+        const angle = (index / 8) * Math.PI * 2;
+        pieces.push(
+          this.add
+            .rectangle(
+              Math.cos(angle) * (radius + 2),
+              Math.sin(angle) * (radius + 2),
+              6,
+              2,
+              0x67747a,
+            )
+            .setRotation(angle),
+        );
+      }
+    } else {
+      pieces.push(this.add.ellipse(0, 5, 26, 12, 0x6c6657));
+      pieces.push(this.add.triangle(-7, 0, 0, 18, 5, 0, 10, 18, 0xce6b61));
+      pieces.push(this.add.triangle(3, 1, 0, 17, 6, 0, 12, 17, 0xd88d5b));
+      pieces.push(this.add.circle(8, 2, 4, 0x8b5aa1));
+    }
+    const body = this.add.container(
+      WIDTH + radius + 6,
+      Phaser.Math.Between(radius + 12, HEIGHT - radius - 16),
+      pieces,
+    );
+    this.seaObstacles.push({ body, radius, scored: false });
+  }
+
+  private spawnDragonRing(difficulty: number): void {
+    const difficultyRadius =
+      this.levelSettings.difficulty === "relaxed"
+        ? 5
+        : this.levelSettings.difficulty === "expert"
+          ? -4
+          : 0;
+    const radius = Math.round(
+      (this.trainerRun
+        ? Phaser.Math.Linear(34, 27, difficulty)
+        : Phaser.Math.Linear(30, 23, difficulty)) + difficultyRadius,
+    );
+    const minimumY = radius + 7;
+    const maximumY = HEIGHT - radius - 12;
+    const courseIndex = this.score + this.dragonRings.length;
+    let y: number;
+    if (this.levelSettings.optionId === "rolling-rings") {
+      y = Phaser.Math.Linear(minimumY, maximumY, (Math.sin(courseIndex * 0.78) + 1) / 2);
+    } else if (this.levelSettings.optionId === "alternating-rings") {
+      y = courseIndex % 2 === 0 ? minimumY : maximumY;
+    } else {
+      y = Phaser.Math.Between(Math.ceil(minimumY), Math.floor(maximumY));
+    }
+    const color =
+      this.levelSettings.mapId === "volcanic-sky"
+        ? 0xffc35d
+        : this.levelSettings.mapId === "moon-kingdom"
+          ? 0xbad8ff
+          : 0xf0d06c;
+    const body = this.add
+      .circle(WIDTH + radius + 6, y, radius, color, 0.12)
+      .setStrokeStyle(5, color);
+    this.dragonRings.push({ body, radius, resolved: false });
+  }
+
   /**
    * A rider can hold a non-cruise power for seconds, unlike a keyboard player
    * tapping a key. Treat trainer effort as a requested altitude so flywheel and
@@ -815,15 +1235,33 @@ export class FlyScene extends Phaser.Scene {
   private collides(): boolean {
     const hitboxWidth = this.trainerRun ? 26 : 34;
     const hitboxHeight =
-      this.levelId === "asteroids" ? (this.trainerRun ? 11 : 16) : this.trainerRun ? 14 : 20;
+      this.levelId === "asteroids"
+        ? this.trainerRun
+          ? 11
+          : 16
+        : this.levelId === "submarine-dive"
+          ? this.trainerRun
+            ? 12
+            : 15
+          : this.levelId === "dragon-flight"
+            ? this.trainerRun
+              ? 14
+              : 18
+            : this.trainerRun
+              ? 14
+              : 20;
     const playerBounds = new Phaser.Geom.Rectangle(
       this.player.x - hitboxWidth / 2,
       this.player.y - hitboxHeight / 2,
       hitboxWidth,
       hitboxHeight,
     );
-    const bottomBoundary = this.levelId === "asteroids" ? HEIGHT : HEIGHT - 15;
-    if (playerBounds.top <= 0 || playerBounds.bottom >= bottomBoundary) return true;
+    const usesFullHeight = ["asteroids", "submarine-dive", "dragon-flight"].includes(this.levelId);
+    const bottomBoundary = usesFullHeight ? HEIGHT : HEIGHT - 15;
+    const upperBoundaryEnabled =
+      this.levelId !== "ornithopter-run" || this.levelSettings.modifierId !== "upper-off";
+    if ((upperBoundaryEnabled && playerBounds.top <= 0) || playerBounds.bottom >= bottomBoundary)
+      return true;
     if (this.levelId === "asteroids") {
       return this.asteroids.some((asteroid) =>
         Phaser.Geom.Intersects.CircleToRectangle(
@@ -832,8 +1270,21 @@ export class FlyScene extends Phaser.Scene {
         ),
       );
     }
+    if (this.levelId === "submarine-dive") {
+      return this.seaObstacles.some((obstacle) =>
+        Phaser.Geom.Intersects.CircleToRectangle(
+          new Phaser.Geom.Circle(obstacle.body.x, obstacle.body.y, obstacle.radius * 0.78),
+          playerBounds,
+        ),
+      );
+    }
+    if (this.levelId === "dragon-flight") return false;
+    const gateParts = (pair: ObstaclePair) =>
+      this.levelSettings.modifierId === "upper-off"
+        ? [pair.bottom, pair.bottomCap]
+        : [pair.top, pair.bottom, pair.topCap, pair.bottomCap];
     return this.obstacles.some((pair) =>
-      [pair.top, pair.bottom, pair.topCap, pair.bottomCap].some((part) =>
+      gateParts(pair).some((part) =>
         Phaser.Geom.Intersects.RectangleToRectangle(playerBounds, part.getBounds()),
       ),
     );
@@ -858,6 +1309,24 @@ export class FlyScene extends Phaser.Scene {
     this.asteroids = remaining;
   }
 
+  private removeOldSeaObstacles(): void {
+    const remaining: SeaObstacle[] = [];
+    for (const obstacle of this.seaObstacles) {
+      if (obstacle.body.x < -obstacle.radius - 8) obstacle.body.destroy();
+      else remaining.push(obstacle);
+    }
+    this.seaObstacles = remaining;
+  }
+
+  private removeOldDragonRings(): void {
+    const remaining: DragonRing[] = [];
+    for (const ring of this.dragonRings) {
+      if (ring.body.x < -ring.radius - 8) ring.body.destroy();
+      else remaining.push(ring);
+    }
+    this.dragonRings = remaining;
+  }
+
   private clearObstacles(): void {
     for (const pair of this.obstacles) {
       for (const part of [pair.top, pair.bottom, pair.topCap, pair.bottomCap]) part.destroy();
@@ -865,6 +1334,10 @@ export class FlyScene extends Phaser.Scene {
     this.obstacles = [];
     for (const asteroid of this.asteroids) asteroid.body.destroy();
     this.asteroids = [];
+    for (const obstacle of this.seaObstacles) obstacle.body.destroy();
+    this.seaObstacles = [];
+    for (const ring of this.dragonRings) ring.body.destroy();
+    this.dragonRings = [];
   }
 
   private checkTelemetryHealth(): boolean {
@@ -881,6 +1354,10 @@ export class FlyScene extends Phaser.Scene {
       this.racerPlayer.setAlpha(0.35);
     } else if (this.levelId === "hill-climber") {
       this.hillPlayer.setAlpha(0.35);
+    } else if (this.levelId === "submarine-dive") {
+      this.submarinePlayer.setAlpha(0.35);
+    } else if (this.levelId === "dragon-flight") {
+      this.dragonPlayer.setAlpha(0.35);
     } else {
       this.player.setTint(0xc96f51);
       this.time.delayedCall(180, () => this.player.clearTint());

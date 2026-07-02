@@ -7,7 +7,15 @@ import {
 import { GameAudio } from "./game/audio";
 import { emitGameEvent, gameEvents } from "./game/events";
 import type { TrajectoryPoint } from "./game/FlyScene";
-import { getLevel, LEVELS, type LevelId } from "./levels";
+import {
+  defaultLevelSettings,
+  DIFFICULTIES,
+  getLevel,
+  LEVELS,
+  settingsFingerprint,
+  type LevelId,
+  type LevelSettings,
+} from "./levels";
 import { formatRunTime, formatSessionMinutes, RideStats } from "./ride-stats";
 import { DemoSource } from "./trainer/demo-source";
 import { FtmsBluetoothSource } from "./trainer/ftms-bluetooth-source";
@@ -74,6 +82,9 @@ export class AppController {
   private wakeLock?: WakeLockSentinelLike;
   private trainerLoadValue?: number;
   private selectedLevel: LevelId = LEVELS[0].id;
+  private readonly levelSettings = Object.fromEntries(
+    LEVELS.map((level) => [level.id, defaultLevelSettings(level.id)]),
+  ) as Record<LevelId, LevelSettings>;
   private terrainResistanceScale = 1;
   private terrainLoadBusy = false;
   private pendingTerrainGrade?: number;
@@ -421,8 +432,7 @@ export class AppController {
     for (const button of this.overlay.querySelectorAll<HTMLButtonElement>("[data-level]")) {
       button.addEventListener("click", () => {
         this.selectedLevel = button.dataset.level as LevelId;
-        if (this.selectedLevel === "hill-climber") this.showHillClimberSetup();
-        else void this.startRun();
+        this.showLevelSetup();
       });
     }
     this.overlay.querySelector("#level-back")?.addEventListener("click", () => {
@@ -433,38 +443,108 @@ export class AppController {
     });
   }
 
-  private showHillClimberSetup(): void {
+  private showLevelSetup(): void {
     this.rideStatsPanel.classList.add("hidden");
+    const level = getLevel(this.selectedLevel);
+    const settings = this.levelSettings[this.selectedLevel];
+    const hasOptions = "options" in level;
+    const hasModifiers = "modifiers" in level;
+    const isHillClimber = this.selectedLevel === "hill-climber";
     const loadControl =
-      this.source?.kind === "ftms-bluetooth" ? this.source.getLoadControl() : undefined;
+      isHillClimber && this.source?.kind === "ftms-bluetooth"
+        ? this.source.getLoadControl()
+        : undefined;
     const supportsTerrainLoad = Boolean(loadControl);
     const selectedScale = supportsTerrainLoad ? this.terrainResistanceScale : 0;
     this.overlay.classList.remove("hidden", "compact");
     this.overlay.innerHTML = `
-      <section class="panel" aria-labelledby="hill-setup-title">
-        <p class="eyebrow">Hill Climber</p>
-        <h2 id="hill-setup-title">Terrain setup</h2>
-        <p>Virtual slope physics are always active: climbs demand more watts, while descents reward coasting and high-speed pedaling.</p>
-        <div class="load-control">
-          <label for="terrain-resistance">Physical terrain resistance</label>
-          <select id="terrain-resistance" ${supportsTerrainLoad ? "" : "disabled"}>
-            ${this.terrainEffectOptions(selectedScale)}
+      <section class="panel" aria-labelledby="level-setup-title">
+        <p class="eyebrow">${escapeHtml(level.title)}</p>
+        <h2 id="level-setup-title">Customize level</h2>
+        <p>${escapeHtml(level.description)}</p>
+        <div class="level-settings">
+          <label for="level-map">Map</label>
+          <select id="level-map">
+            ${this.choiceOptions(level.maps, settings.mapId)}
           </select>
-          <span class="fine-print">${supportsTerrainLoad ? `Starting the level will automatically vary ${escapeHtml(loadControl!.label.toLowerCase())} with the slope. Your manual setting remains the baseline.` : "This controller does not expose compatible automatic FTMS load control."}</span>
+          <label for="level-difficulty">Difficulty</label>
+          <select id="level-difficulty">
+            ${this.choiceOptions(DIFFICULTIES, settings.difficulty)}
+          </select>
+          ${hasOptions ? `<label for="level-option">${escapeHtml(level.optionLabel)}</label><select id="level-option">${this.choiceOptions(level.options, settings.optionId)}</select>` : ""}
+          ${hasModifiers ? `<label for="level-modifier">${escapeHtml(level.modifierLabel)}</label><select id="level-modifier">${this.choiceOptions(level.modifiers, settings.modifierId)}</select>` : ""}
         </div>
+        ${
+          isHillClimber
+            ? `<p>Virtual slope physics are always active: climbs demand more watts, while descents reward coasting and high-speed pedaling.</p>
+          <div class="load-control">
+            <label for="terrain-resistance">Physical terrain resistance</label>
+            <select id="terrain-resistance" ${supportsTerrainLoad ? "" : "disabled"}>
+              ${this.terrainEffectOptions(selectedScale)}
+            </select>
+            <span class="fine-print">${supportsTerrainLoad ? `Starting the level will automatically vary ${escapeHtml(loadControl!.label.toLowerCase())} with the slope. Your manual setting remains the baseline.` : "This controller does not expose compatible automatic FTMS load control."}</span>
+          </div>`
+            : ""
+        }
         <div class="actions">
-          <button id="start-hill" class="primary">Start climb</button>
-          <button id="hill-back">Levels</button>
+          <button id="start-level" class="primary">Start ${escapeHtml(level.title)}</button>
+          <button id="level-settings-back">Levels</button>
         </div>
       </section>`;
-    this.overlay.querySelector("#start-hill")?.addEventListener("click", () => {
-      const select = this.overlay.querySelector<HTMLSelectElement>("#terrain-resistance");
-      this.terrainResistanceScale = supportsTerrainLoad ? Number(select?.value ?? 0) : 0;
+    this.overlay.querySelector("#start-level")?.addEventListener("click", () => {
+      const difficulty = this.overlay.querySelector<HTMLSelectElement>("#level-difficulty");
+      this.levelSettings[this.selectedLevel] = {
+        mapId: this.overlay.querySelector<HTMLSelectElement>("#level-map")!.value,
+        difficulty: difficulty!.value as LevelSettings["difficulty"],
+        optionId: this.overlay.querySelector<HTMLSelectElement>("#level-option")?.value,
+        modifierId: this.overlay.querySelector<HTMLSelectElement>("#level-modifier")?.value,
+      };
+      if (isHillClimber) {
+        const terrain = this.overlay.querySelector<HTMLSelectElement>("#terrain-resistance");
+        this.terrainResistanceScale = supportsTerrainLoad ? Number(terrain?.value ?? 0) : 0;
+      }
       void this.startRun();
     });
-    this.overlay.querySelector("#hill-back")?.addEventListener("click", () => {
+    this.overlay.querySelector("#level-settings-back")?.addEventListener("click", () => {
       this.showLevelSelect();
     });
+  }
+
+  private choiceOptions(
+    choices: readonly { id: string; label: string }[],
+    selectedId?: string,
+  ): string {
+    return choices
+      .map(
+        (choice) =>
+          `<option value="${escapeHtml(choice.id)}" ${choice.id === selectedId ? "selected" : ""}>${escapeHtml(choice.label)}</option>`,
+      )
+      .join("");
+  }
+
+  private levelSettingsSummary(levelId: LevelId): string {
+    const level = getLevel(levelId);
+    const settings = this.levelSettings[levelId];
+    const labels = [
+      level.maps.find(({ id }) => id === settings.mapId)?.label ?? settings.mapId,
+      DIFFICULTIES.find(({ id }) => id === settings.difficulty)?.label ?? settings.difficulty,
+    ];
+    if ("options" in level) {
+      labels.push(
+        level.options.find(({ id }) => id === settings.optionId)?.label ??
+          settings.optionId ??
+          "Default",
+      );
+    }
+    if ("modifiers" in level) {
+      labels.push(
+        level.modifiers.find(({ id }) => id === settings.modifierId)?.label ??
+          settings.modifierId ??
+          "Default",
+      );
+    }
+    if (levelId === "hill-climber") labels.push(`Terrain effect ${this.terrainResistanceScale}×`);
+    return labels.join(" · ");
   }
 
   private showGameMenu(): void {
@@ -776,6 +856,7 @@ export class AppController {
     this.traceActive = mode === "trace";
     this.runPanelOpen = false;
     const levelId: LevelId = mode === "trace" ? "ornithopter-run" : this.selectedLevel;
+    const settings = this.levelSettings[levelId];
     this.scoreLabel.textContent = getLevel(levelId).scoreLabel;
     this.countdownActive = false;
     this.updateConnectionPillInteractivity();
@@ -788,6 +869,7 @@ export class AppController {
       demo: this.source?.kind === "demo",
       mode,
       levelId,
+      settings,
     });
     if (this.latestSample.powerW !== undefined) {
       emitGameEvent("telemetry", {
@@ -866,16 +948,27 @@ export class AppController {
     this.updateConnectionPillInteractivity();
     await this.releaseWakeLock();
     this.audio.play("crash");
-    const scoreKey = `${SCORE_KEY}.${this.selectedLevel}`;
-    const legacyBest =
-      this.selectedLevel === "ornithopter-run" ? localStorage.getItem(SCORE_KEY) : null;
+    const settings = this.levelSettings[this.selectedLevel];
+    const fingerprint = settingsFingerprint(
+      settings,
+      this.selectedLevel === "hill-climber" ? this.terrainResistanceScale : undefined,
+    );
+    const scoreKey = `${SCORE_KEY}.${this.selectedLevel}.${fingerprint}`;
+    const usesDefaults =
+      this.selectedLevel !== "hill-climber" &&
+      settingsFingerprint(settings) ===
+        settingsFingerprint(defaultLevelSettings(this.selectedLevel));
+    const legacyBest = usesDefaults
+      ? (localStorage.getItem(`${SCORE_KEY}.${this.selectedLevel}`) ??
+        (this.selectedLevel === "ornithopter-run" ? localStorage.getItem(SCORE_KEY) : null))
+      : null;
     const previousBest = Number(localStorage.getItem(scoreKey) ?? legacyBest ?? 0);
     const best = Math.max(score, previousBest);
     const level = getLevel(this.selectedLevel);
     localStorage.setItem(scoreKey, String(best));
     this.overlay.classList.remove("hidden");
     this.overlay.innerHTML = `
-      <section class="panel small-panel"><p class="eyebrow">${escapeHtml(level.title)} over</p><h2>${score}</h2><p>Best ${best}</p>
+      <section class="panel small-panel"><p class="eyebrow">${escapeHtml(level.title)} over</p><h2>${score}</h2><p>Best ${best}</p><p class="fine-print">${escapeHtml(this.levelSettingsSummary(this.selectedLevel))}</p>
         <div class="actions"><button id="again-button" class="primary">Fly again</button><button id="levels-button">Levels</button><button id="quit-button">Setup</button></div>
       </section>`;
     this.overlay

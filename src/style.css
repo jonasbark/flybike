@@ -431,6 +431,31 @@ button.primary:focus-visible {
   opacity: 0.78;
 }
 
+.level-settings {
+  display: grid;
+  grid-template-columns: minmax(7rem, auto) 1fr;
+  gap: 0.65rem 0.8rem;
+  align-items: center;
+  margin: 1.2rem auto;
+  padding: 0.9rem;
+  text-align: left;
+  background: rgba(112, 80, 55, 0.09);
+  border: 1px solid rgba(112, 80, 55, 0.45);
+}
+
+.level-settings label {
+  font-family: "Pixelify Sans", monospace;
+}
+
+.level-settings select {
+  width: 100%;
+  min-height: 2.6rem;
+  padding: 0.45rem 0.6rem;
+  color: #3d291f;
+  background: #f4e4bd;
+  border: 1px solid #72513b;
+}
+
 @media (max-width: 620px) {
   .hud {
     top: auto;
@@ -452,6 +477,9 @@ button.primary:focus-visible {
   .ride-stats {
     right: max(0.6rem, env(safe-area-inset-right));
     min-width: 0;
+  }
+  .level-settings {
+    grid-template-columns: 1fr;
   }
 }
 
