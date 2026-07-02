@@ -80,6 +80,7 @@ export class AppController {
   private lastTerrainLoadValue?: number;
   private terrainRestoreRequested = false;
   private terrainLoadFailed = false;
+  private runPanelOpen = false;
   private readonly rideStats = new RideStats();
   private readonly audio = new GameAudio();
 
@@ -96,6 +97,7 @@ export class AppController {
   private readonly runDistance = document.querySelector<HTMLElement>("#run-distance")!;
   private readonly sessionDistance = document.querySelector<HTMLElement>("#session-distance")!;
   private readonly connectionPill = document.querySelector<HTMLButtonElement>("#connection-pill")!;
+  private readonly menuButton = document.querySelector<HTMLButtonElement>("#menu-button")!;
   private readonly muteButton = document.querySelector<HTMLButtonElement>("#mute-button")!;
   private readonly traceCuePanel = document.querySelector<HTMLElement>("#trace-cue")!;
   private readonly traceCueTitle = document.querySelector<HTMLElement>("#trace-cue-title")!;
@@ -108,6 +110,7 @@ export class AppController {
       this.muteButton.textContent = this.audio.toggle() ? "Sound off" : "Sound on";
     });
     this.connectionPill.addEventListener("click", () => this.showBikeSettings());
+    this.menuButton.addEventListener("click", () => this.showGameMenu());
     gameEvents.addEventListener("score", (event) => {
       const score = (event as CustomEvent<number>).detail;
       this.scoreValue.textContent = String(score);
@@ -143,6 +146,7 @@ export class AppController {
   private showHome(message?: string): void {
     this.gameActive = false;
     this.traceActive = false;
+    this.runPanelOpen = false;
     this.pauseRideStats();
     this.rideStatsPanel.classList.add("hidden");
     this.updateConnectionPillInteractivity();
@@ -284,9 +288,10 @@ export class AppController {
   }
 
   private updateConnectionPillInteractivity(): void {
+    const canOpenRunPanel =
+      this.gameActive && !this.traceActive && !this.runPanelOpen && !this.countdownActive;
     const canOpenSettings =
-      this.gameActive &&
-      !this.traceActive &&
+      canOpenRunPanel &&
       this.source?.kind === "ftms-bluetooth" &&
       this.source.getStatus().state === "connected";
     this.connectionPill.disabled = !canOpenSettings;
@@ -299,10 +304,13 @@ export class AppController {
         ? `${this.connectionPill.textContent ?? "Trainer"}: open bike settings`
         : "Trainer connection status",
     );
+    this.menuButton.classList.toggle("hidden", !this.gameActive || this.traceActive);
+    this.menuButton.disabled = !canOpenRunPanel;
   }
 
   private showTrainerReady(status: ConnectionStatus, demo = false): void {
     this.gameActive = false;
+    this.runPanelOpen = false;
     this.pauseRideStats();
     this.rideStatsPanel.classList.add("hidden");
     this.updateConnectionPillInteractivity();
@@ -391,6 +399,7 @@ export class AppController {
 
   private showLevelSelect(): void {
     this.gameActive = false;
+    this.runPanelOpen = false;
     this.pauseRideStats();
     this.rideStatsPanel.classList.add("hidden");
     this.updateConnectionPillInteractivity();
@@ -458,19 +467,60 @@ export class AppController {
     });
   }
 
+  private showGameMenu(): void {
+    if (!this.gameActive || this.traceActive || this.runPanelOpen) return;
+    this.runPanelOpen = true;
+    this.restoreTerrainLoad();
+    this.pauseRideStats();
+    emitGameEvent("pause-run", { reason: "ui" });
+    this.updateConnectionPillInteractivity();
+    this.overlay.classList.remove("hidden", "compact");
+    this.overlay.innerHTML = `
+      <section class="panel small-panel" aria-labelledby="game-menu-title">
+        <p class="eyebrow">Run paused</p>
+        <h2 id="game-menu-title">Menu</h2>
+        <div class="actions">
+          <button id="resume-button" class="primary">Resume</button>
+          <button id="levels-button">Levels</button>
+          <button id="quit-button">Setup</button>
+        </div>
+      </section>`;
+    this.overlay
+      .querySelector("#resume-button")
+      ?.addEventListener("click", () => void this.resumeRun());
+    this.overlay.querySelector("#levels-button")?.addEventListener("click", () => {
+      this.leaveRunForLevels();
+    });
+    this.overlay.querySelector("#quit-button")?.addEventListener("click", () => this.quitRun());
+  }
+
+  private leaveRunForLevels(): void {
+    this.gameActive = false;
+    this.traceActive = false;
+    this.runPanelOpen = false;
+    this.pauseRideStats();
+    this.rideStatsPanel.classList.add("hidden");
+    this.restoreTerrainLoad();
+    emitGameEvent("stop-run", undefined);
+    void this.releaseWakeLock();
+    this.showLevelSelect();
+  }
+
   private showBikeSettings(): void {
     if (
       !this.gameActive ||
       this.traceActive ||
+      this.runPanelOpen ||
       this.source?.kind !== "ftms-bluetooth" ||
       this.source.getStatus().state !== "connected"
     ) {
       return;
     }
+    this.runPanelOpen = true;
     this.restoreTerrainLoad();
     this.pauseRideStats();
-    emitGameEvent("pause-run", undefined);
-    this.connectionPill.disabled = true;
+    emitGameEvent("pause-run", { reason: "ui" });
+    this.updateConnectionPillInteractivity();
     const status = this.source.getStatus();
     this.overlay.classList.remove("hidden", "compact");
     this.overlay.innerHTML = `
@@ -724,10 +774,11 @@ export class AppController {
     this.hud.classList.remove("hidden");
     this.gameActive = true;
     this.traceActive = mode === "trace";
+    this.runPanelOpen = false;
     const levelId: LevelId = mode === "trace" ? "ornithopter-run" : this.selectedLevel;
     this.scoreLabel.textContent = getLevel(levelId).scoreLabel;
-    this.updateConnectionPillInteractivity();
     this.countdownActive = false;
+    this.updateConnectionPillInteractivity();
     this.audio.play("start");
     await this.requestWakeLock();
     if (this.demoSource) this.demoSource.setEffort(this.demoInputPressed ? 1 : 120 / 260);
@@ -753,16 +804,17 @@ export class AppController {
       void this.finishTrace(message);
       return;
     }
-    emitGameEvent("pause-run", undefined);
-    this.showPause("Waiting for trainer", message);
+    this.showPause("Waiting for trainer", message, "signal");
   }
 
-  private showPause(title: string, message: string): void {
+  private showPause(title: string, message: string, reason: "ui" | "signal" = "ui"): void {
+    this.runPanelOpen = true;
     this.restoreTerrainLoad();
     this.pauseRideStats();
-    emitGameEvent("pause-run", undefined);
+    emitGameEvent("pause-run", { reason });
     const needsReconnect =
       this.source?.kind === "ftms-bluetooth" && this.source.getStatus().state !== "connected";
+    this.updateConnectionPillInteractivity();
     this.overlay.classList.remove("hidden");
     this.overlay.innerHTML = `
       <section class="panel small-panel"><h2>${escapeHtml(title)}</h2><p>${escapeHtml(message)}</p>
@@ -791,6 +843,7 @@ export class AppController {
     if (this.source?.getStatus().state !== "connected") return;
     this.overlay.classList.add("hidden");
     await this.countInGame();
+    this.runPanelOpen = false;
     emitGameEvent("resume-run", undefined);
     this.resumeRideStats();
     this.updateConnectionPillInteractivity();
@@ -807,6 +860,7 @@ export class AppController {
 
   private async handleGameOver(score: number): Promise<void> {
     this.gameActive = false;
+    this.runPanelOpen = false;
     this.pauseRideStats();
     this.restoreTerrainLoad();
     this.updateConnectionPillInteractivity();
@@ -836,6 +890,7 @@ export class AppController {
   private quitRun(): void {
     this.gameActive = false;
     this.traceActive = false;
+    this.runPanelOpen = false;
     this.pauseRideStats();
     this.rideStatsPanel.classList.add("hidden");
     this.restoreTerrainLoad();
@@ -886,6 +941,7 @@ export class AppController {
     if (!this.traceActive) return;
     this.traceActive = false;
     this.gameActive = false;
+    this.runPanelOpen = false;
     this.pauseRideStats();
     this.updateConnectionPillInteractivity();
     this.stopTraceGuide();

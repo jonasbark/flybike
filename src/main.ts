@@ -15,8 +15,11 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
       <div><span>Time</span> <strong id="run-time">00:00</strong> <small>(<span id="session-time">0</span> min)</small></div>
       <div><span>Distance</span> <strong id="run-distance">0.00</strong> km <small>(<span id="session-distance">0.00</span> km)</small></div>
     </div>
-    <button id="connection-pill" class="connection-pill" data-state="disconnected" type="button" disabled>disconnected</button>
-    <button id="mute-button" class="mute-button" type="button">Sound on</button>
+    <div class="top-controls">
+      <button id="connection-pill" class="connection-pill" data-state="disconnected" type="button" disabled>disconnected</button>
+      <button id="menu-button" class="menu-button hidden" type="button" disabled>Menu</button>
+      <button id="mute-button" class="mute-button" type="button">Sound on</button>
+    </div>
     <div id="trace-cue" class="trace-cue hidden" aria-live="polite">
       <strong id="trace-cue-title">Cruise</strong>
       <span id="trace-cue-copy">Hold your comfortable effort</span>

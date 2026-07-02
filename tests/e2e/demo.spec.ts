@@ -46,7 +46,26 @@ test("starts the Racer level with lap scoring", async ({ page }) => {
   await page.getByRole("button", { name: /Racer/ }).click();
   await expect(page.locator("#hud")).toBeVisible({ timeout: 5_000 });
   await expect(page.locator("#score-label")).toHaveText("laps");
+  await page.keyboard.down("Space");
+  await page.waitForTimeout(8_000);
+  await page.keyboard.up("Space");
   await expect(page.getByRole("heading", { name: "Racer over" })).not.toBeVisible();
+});
+
+test("uses a dedicated game menu separate from trainer status", async ({ page }) => {
+  await page.goto("/");
+  await page.getByRole("button", { name: "Play with keys / touch" }).click();
+  await page.getByRole("button", { name: "Start flight" }).click();
+  await page.getByRole("button", { name: /Racer/ }).click();
+
+  const menu = page.getByRole("button", { name: "Menu" });
+  await expect(menu).toBeEnabled({ timeout: 5_000 });
+  await expect(page.getByRole("button", { name: "Trainer connection status" })).toBeDisabled();
+  await menu.click();
+  await expect(page.getByRole("heading", { name: "Menu" })).toBeVisible();
+  await expect(menu).toBeDisabled();
+  await page.getByRole("button", { name: "Resume", exact: true }).click();
+  await expect(menu).toBeEnabled({ timeout: 5_000 });
 });
 
 test("configures and starts Hill Climber", async ({ page }) => {

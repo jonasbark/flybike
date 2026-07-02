@@ -32,9 +32,9 @@ The lower-left ride display shows active run time as minutes and seconds, with a
 
 ### Levels
 
-- **Ornithopter Run** is the original endless gate course.
+- **Ornithopter Run** is the original endless gate course, now backed by independently scrolling clouds, distant mountains, midground hills, and foreground villages.
 - **Asteroids** replaces the landscape with a moving starfield. Dodge incoming asteroids by pedaling higher or easing lower as the field accelerates.
-- **Racer** is a fixed-screen overhead circuit inspired by classic arcade sprint racing. Steering is automatic; harder pedaling accelerates and moves toward the outer racing line, while easing slows and moves inward. Avoid rival cars and complete laps.
+- **Racer** is a fixed-screen overhead circuit inspired by classic arcade sprint racing. Steering is automatic; harder pedaling accelerates and moves toward the outer racing line, while easing slows and moves inward. Cars can pass through one another without collision penalties, keeping overtaking focused on speed.
 - **Hill Climber** is an endless procedurally generated side-scrolling landscape. Uphill grades require additional watts to hold speed. Downhills support coasting, and pedaling downhill produces a large speed boost.
 
 Each level keeps a separate high score. The level catalog lives in `src/levels.ts`; gameplay-specific obstacle and backdrop behavior lives in the Phaser scene.
@@ -50,6 +50,8 @@ At the end, download the CSV. It contains cue timing, power, cadence, speed, raw
 Some FTMS trainers advertise direct resistance control; others advertise simulated grade. When either capability is available, setup shows a bounded load slider. Changing the slider alone does nothing: start at a low value and press **Apply load** to send it. FlyBike requests FTMS control, clamps the command to the advertised/safe range, and requires the trainer to acknowledge it. No load is restored or applied automatically after reconnecting.
 
 During a flight, select the trainer name in the upper-right corner to pause and reopen the same load control. Apply the new setting, then resume after the countdown.
+
+The separate **Menu** button pauses any normal game, including keyboard demo mode, and provides Resume, Levels, and Setup actions. The trainer-name button only opens Bluetooth bike settings; both controls are locked while another pause panel is open.
 
 Hill Climber can also vary compatible FTMS resistance automatically with terrain. Before starting, choose Off, Gentle, Standard, or Strong. Virtual slope physics remain active in every setting. Automatic commands are throttled, use the manually applied load as their baseline, and restore that baseline when the game pauses or ends. The terrain effect can also be changed from the in-game bike settings screen.
 

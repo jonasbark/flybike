@@ -352,23 +352,39 @@ button.primary:focus-visible {
   font-size: 0.72rem;
 }
 
-.connection-pill,
-.mute-button {
+.top-controls {
   position: absolute;
-  z-index: 4;
+  z-index: 6;
   top: max(0.65rem, env(safe-area-inset-top));
+  right: max(0.65rem, env(safe-area-inset-right));
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.35rem;
+  max-width: calc(100vw - 1.3rem);
+}
+
+.connection-pill,
+.menu-button,
+.mute-button {
+  position: static;
   font-family: "Pixelify Sans", monospace;
   font-size: 0.74rem;
-}
-.connection-pill {
-  right: max(6.7rem, calc(env(safe-area-inset-right) + 6.2rem));
   min-height: 0;
-  padding: 0.4rem 0.6rem;
+  padding: 0.35rem 0.5rem;
   color: #f5e4b8;
   background: rgba(36, 27, 22, 0.78);
   border: 1px solid #9c7450;
   box-shadow: none;
+}
+
+.connection-pill {
+  max-width: min(13rem, 38vw);
+  overflow: hidden;
+  padding: 0.4rem 0.6rem;
+  text-overflow: ellipsis;
   text-transform: uppercase;
+  white-space: nowrap;
 }
 .connection-pill:not(:disabled) {
   cursor: pointer;
@@ -385,16 +401,6 @@ button.primary:focus-visible {
 .connection-pill[data-state="stale"] {
   border-color: #c66a53;
   color: #ffd1b5;
-}
-.mute-button {
-  right: max(0.65rem, env(safe-area-inset-right));
-  z-index: 6;
-  min-height: 0;
-  padding: 0.35rem 0.5rem;
-  color: #f5e4b8;
-  background: rgba(36, 27, 22, 0.78);
-  border: 1px solid #9c7450;
-  box-shadow: none;
 }
 
 .level-list {

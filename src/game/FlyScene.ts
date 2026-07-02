@@ -40,6 +40,10 @@ type StartRunDetail = {
   levelId: LevelId;
 };
 
+type PauseRunDetail = {
+  reason: "ui" | "signal";
+};
+
 export type TrajectoryPoint = {
   elapsedMs: number;
   y: number;
@@ -78,6 +82,7 @@ export class FlyScene extends Phaser.Scene {
   private racerBackdrop!: Phaser.GameObjects.Container;
   private hillBackdrop!: Phaser.GameObjects.Container;
   private clouds: Phaser.GameObjects.Ellipse[] = [];
+  private skyParallaxLayers: Array<{ container: Phaser.GameObjects.Container; speed: number }> = [];
   private stars: Phaser.GameObjects.Rectangle[] = [];
   private racerPlayer!: Phaser.GameObjects.Container;
   private hillPlayer!: Phaser.GameObjects.Container;
@@ -93,6 +98,7 @@ export class FlyScene extends Phaser.Scene {
   private velocityY = 0;
   private running = false;
   private pausedForSignal = false;
+  private waitingForSignal = false;
   private elapsed = 0;
   private spawnElapsed = 0;
   private score = 0;
@@ -257,25 +263,17 @@ export class FlyScene extends Phaser.Scene {
     this.racerLane +=
       (Phaser.Math.Linear(8, -8, normalizedEffort) - this.racerLane) * (1 - Math.exp(-dt / 0.55));
 
-    const previousLap = Math.floor(this.racerProgress);
     this.racerProgress += this.racerSpeed * dt;
-    if (Math.floor(this.racerProgress) > previousLap) this.incrementScore();
+    const completedLaps = Math.floor(this.racerProgress);
+    if (completedLaps > this.score) {
+      this.score = completedLaps;
+      emitGameEvent("score", this.score);
+    }
     this.positionRaceCar(this.racerPlayer, this.racerProgress, this.racerLane);
 
     for (const rival of this.raceRivals) {
       rival.progress += rival.speed * dt;
       this.positionRaceCar(rival.body, rival.progress, rival.lane);
-      if (
-        Phaser.Math.Distance.Between(
-          this.racerPlayer.x,
-          this.racerPlayer.y,
-          rival.body.x,
-          rival.body.y,
-        ) < 8
-      ) {
-        this.endRun();
-        return;
-      }
     }
   }
 
@@ -377,22 +375,81 @@ export class FlyScene extends Phaser.Scene {
     this.cameras.main.setBackgroundColor("#080b18");
     const skyObjects: Phaser.GameObjects.GameObject[] = [
       this.add.rectangle(160, 90, 320, 180, 0x86b9c2),
+      this.add.rectangle(160, 108, 320, 54, 0xa8c9bd, 0.34),
       this.add.circle(269, 31, 18, 0xf7d28a, 0.85),
-      this.add.rectangle(160, 151, 320, 58, 0xa5a66a),
-      this.add.triangle(60, 149, 0, 48, 50, 0, 100, 48, 0x71865d),
-      this.add.triangle(160, 151, 0, 53, 60, 0, 120, 53, 0x829062),
-      this.add.triangle(272, 151, 0, 45, 55, 0, 110, 45, 0x657956),
     ];
-    for (let i = 0; i < 12; i += 1) {
-      skyObjects.push(this.add.rectangle(i * 31, 163 + (i % 3) * 2, 22, 25, 0x67513c));
-      skyObjects.push(this.add.rectangle(i * 31, 151 + (i % 3) * 2, 25, 4, 0xd3b36e));
+
+    const farMountains = this.add.container();
+    const midMountains = this.add.container();
+    const nearHills = this.add.container();
+    const foreground = this.add.container();
+    for (const tileX of [0, WIDTH]) {
+      for (let index = 0; index < 5; index += 1) {
+        farMountains.add(
+          this.add.triangle(
+            tileX + index * 74 - 24,
+            137 + (index % 2) * 3,
+            0,
+            39,
+            43,
+            0,
+            86,
+            39,
+            index % 2 === 0 ? 0x78918a : 0x829a90,
+            0.72,
+          ),
+        );
+      }
+      for (let index = 0; index < 4; index += 1) {
+        midMountains.add(
+          this.add.triangle(
+            tileX + index * 92 - 30,
+            149,
+            0,
+            55,
+            55,
+            0,
+            110,
+            55,
+            index % 2 === 0 ? 0x657956 : 0x71865d,
+          ),
+        );
+      }
+      for (let index = 0; index < 6; index += 1) {
+        nearHills.add(
+          this.add.ellipse(
+            tileX + index * 62 - 15,
+            147 + (index % 2) * 3,
+            92,
+            40,
+            index % 2 === 0 ? 0x879361 : 0x77875a,
+          ),
+        );
+      }
+      foreground.add(this.add.rectangle(tileX + WIDTH / 2, 163, WIDTH, 34, 0xa5a66a));
+      foreground.add(this.add.rectangle(tileX + WIDTH / 2, 151, WIDTH, 4, 0xd3b36e));
+      for (let index = 0; index < 12; index += 1) {
+        const x = tileX + index * 29;
+        const height = 17 + (index % 4) * 3;
+        foreground.add(this.add.rectangle(x, 165 - height / 2, 18, height, 0x67513c));
+        foreground.add(this.add.rectangle(x, 153, 21, 3, 0xd8b76e));
+        foreground.add(this.add.rectangle(x - 4, 160, 2, 3, 0xf0d28b, 0.7));
+      }
     }
+    this.skyParallaxLayers = [
+      { container: farMountains, speed: 1.8 },
+      { container: midMountains, speed: 4.2 },
+      { container: nearHills, speed: 7.5 },
+      { container: foreground, speed: 12 },
+    ];
+    const skyClouds: Phaser.GameObjects.GameObject[] = [];
     for (let i = 0; i < 7; i += 1) {
       const cloud = this.add.ellipse(35 + i * 58, 30 + (i % 3) * 17, 36, 9, 0xf3ead6, 0.5);
-      cloud.setData("drift", 2 + (i % 2));
+      cloud.setData("drift", 2.5 + (i % 3) * 1.4);
       this.clouds.push(cloud);
-      skyObjects.push(cloud);
+      skyClouds.push(cloud);
     }
+    skyObjects.push(...skyClouds, farMountains, midMountains, nearHills, foreground);
     this.skyBackdrop = this.add.container(0, 0, skyObjects).setDepth(-10);
 
     const spaceObjects: Phaser.GameObjects.GameObject[] = [
@@ -475,7 +532,7 @@ export class FlyScene extends Phaser.Scene {
   }
 
   private createRaceCars(): void {
-    this.racerPlayer = this.createRaceCar(0xd14b3f);
+    this.racerPlayer = this.createRaceCar(0xd14b3f).setDepth(2);
     const rivals = [
       { progress: 0.2, lane: -8, speed: 0.032, color: 0xf0c74f },
       { progress: 0.48, lane: 0, speed: 0.036, color: 0x4c79c6 },
@@ -484,7 +541,7 @@ export class FlyScene extends Phaser.Scene {
     this.raceRivals = rivals.map(({ color, ...rival }) => ({
       ...rival,
       startProgress: rival.progress,
-      body: this.createRaceCar(color),
+      body: this.createRaceCar(color).setDepth(1),
     }));
   }
 
@@ -560,6 +617,10 @@ export class FlyScene extends Phaser.Scene {
 
   private animateBackdrop(dt: number): void {
     if (this.skyBackdrop.visible) {
+      for (const layer of this.skyParallaxLayers) {
+        layer.container.x -= layer.speed * dt;
+        if (layer.container.x <= -WIDTH) layer.container.x += WIDTH;
+      }
       for (const cloud of this.clouds) {
         cloud.x -= (cloud.getData("drift") as number) * dt;
         if (cloud.x < -20) cloud.x = 340;
@@ -637,6 +698,7 @@ export class FlyScene extends Phaser.Scene {
     this.score = 0;
     this.lastTrajectoryAt = 0;
     this.pausedForSignal = false;
+    this.waitingForSignal = false;
     this.running = true;
     emitGameEvent("score", 0);
   };
@@ -645,23 +707,31 @@ export class FlyScene extends Phaser.Scene {
     const detail = (event as CustomEvent<{ powerW: number; timestamp: number }>).detail;
     this.powerW = detail.powerW;
     this.lastTelemetryAt = performance.now();
-    if (this.pausedForSignal) emitGameEvent("signal-returned", undefined);
+    if (this.pausedForSignal && this.waitingForSignal) {
+      this.waitingForSignal = false;
+      emitGameEvent("signal-returned", undefined);
+    }
   };
 
-  private readonly onPauseRun = (): void => {
-    if (this.running) this.pausedForSignal = true;
+  private readonly onPauseRun = (event: Event): void => {
+    if (!this.running) return;
+    const detail = (event as CustomEvent<PauseRunDetail>).detail;
+    this.pausedForSignal = true;
+    this.waitingForSignal = detail?.reason === "signal";
   };
 
   private readonly onResumeRun = (): void => {
     if (this.running) {
       this.lastTelemetryAt = performance.now();
       this.pausedForSignal = false;
+      this.waitingForSignal = false;
     }
   };
 
   private readonly onStopRun = (): void => {
     this.running = false;
     this.pausedForSignal = false;
+    this.waitingForSignal = false;
     this.clearObstacles();
     this.rawPlayerY = 88;
     this.player.setPosition(PLAYER_X, 88).setRotation(0);
@@ -800,6 +870,7 @@ export class FlyScene extends Phaser.Scene {
   private checkTelemetryHealth(): boolean {
     if (performance.now() - this.lastTelemetryAt <= 2_000) return true;
     this.pausedForSignal = true;
+    this.waitingForSignal = true;
     emitGameEvent("signal-stale", undefined);
     return false;
   }
