@@ -4,6 +4,8 @@ FlyBike is an endless arcade flight game controlled by a smart bike trainer. Ped
 
 The app is a completely static SPA. Trainer data stays in the browser and no account or server is required.
 
+Playable at: https://seanrjohnson.github.io/flybike/
+
 ## Supported hardware and browsers
 
 The first release reads the Bluetooth Fitness Machine Service (FTMS) Indoor Bike Data characteristic. It is designed for the Saris M2, and should work with other FTMS trainers that report instantaneous power.
