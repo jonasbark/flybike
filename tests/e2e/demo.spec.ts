@@ -40,7 +40,9 @@ test("starts the Asteroids level with its own score label", async ({ page }) => 
   await page.getByRole("button", { name: "Play with keys / touch" }).click();
   await page.getByRole("button", { name: "Start flight" }).click();
   await page.getByRole("button", { name: /Asteroids/ }).click();
+  await expect(page.locator("#game-host canvas")).toHaveAttribute("data-level", "asteroids");
   await page.getByLabel("Map").selectOption("red-nebula");
+  await expect(page.locator("#game-host canvas")).toHaveAttribute("data-map", "red-nebula");
   await page.getByLabel("Difficulty").selectOption("expert");
   await page.getByLabel("Rock field").selectOption("large");
   await page.getByRole("button", { name: "Start Asteroids" }).click();

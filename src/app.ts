@@ -247,6 +247,7 @@ export class AppController {
     if (this.gameActive && sample.powerW !== undefined) {
       emitGameEvent("telemetry", {
         powerW: Math.max(0, sample.powerW),
+        cadenceRpm: sample.cadenceRpm,
         timestamp: sample.timestamp,
       });
     }
@@ -432,6 +433,7 @@ export class AppController {
     for (const button of this.overlay.querySelectorAll<HTMLButtonElement>("[data-level]")) {
       button.addEventListener("click", () => {
         this.selectedLevel = button.dataset.level as LevelId;
+        this.previewLevel(this.levelSettings[this.selectedLevel]);
         this.showLevelSetup();
       });
     }
@@ -491,6 +493,20 @@ export class AppController {
           <button id="level-settings-back">Levels</button>
         </div>
       </section>`;
+    const previewCurrentSettings = () => {
+      this.previewLevel({
+        mapId: this.overlay.querySelector<HTMLSelectElement>("#level-map")!.value,
+        difficulty: this.overlay.querySelector<HTMLSelectElement>("#level-difficulty")!.value as
+          "relaxed" | "standard" | "expert",
+        optionId: this.overlay.querySelector<HTMLSelectElement>("#level-option")?.value,
+        modifierId: this.overlay.querySelector<HTMLSelectElement>("#level-modifier")?.value,
+      });
+    };
+    for (const select of this.overlay.querySelectorAll<HTMLSelectElement>(
+      ".level-settings select",
+    )) {
+      select.addEventListener("change", previewCurrentSettings);
+    }
     this.overlay.querySelector("#start-level")?.addEventListener("click", () => {
       const difficulty = this.overlay.querySelector<HTMLSelectElement>("#level-difficulty");
       this.levelSettings[this.selectedLevel] = {
@@ -507,6 +523,13 @@ export class AppController {
     });
     this.overlay.querySelector("#level-settings-back")?.addEventListener("click", () => {
       this.showLevelSelect();
+    });
+  }
+
+  private previewLevel(settings: LevelSettings): void {
+    emitGameEvent("preview-level", {
+      levelId: this.selectedLevel,
+      settings,
     });
   }
 
@@ -874,6 +897,7 @@ export class AppController {
     if (this.latestSample.powerW !== undefined) {
       emitGameEvent("telemetry", {
         powerW: this.latestSample.powerW,
+        cadenceRpm: this.latestSample.cadenceRpm,
         timestamp: this.latestSample.timestamp,
       });
     }

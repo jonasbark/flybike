@@ -11,28 +11,28 @@ import {
 } from "./hill-physics";
 
 type ObstaclePair = {
-  top: Phaser.GameObjects.Rectangle;
-  bottom: Phaser.GameObjects.Rectangle;
-  topCap: Phaser.GameObjects.Rectangle;
-  bottomCap: Phaser.GameObjects.Rectangle;
+  top: Phaser.GameObjects.Image;
+  bottom: Phaser.GameObjects.Image;
+  topCap: Phaser.GameObjects.Image;
+  bottomCap: Phaser.GameObjects.Image;
   scored: boolean;
 };
 
 type AsteroidObstacle = {
-  body: Phaser.GameObjects.Container;
+  body: Phaser.GameObjects.Image;
   radius: number;
   spin: number;
   scored: boolean;
 };
 
 type SeaObstacle = {
-  body: Phaser.GameObjects.Container;
+  body: Phaser.GameObjects.Image;
   radius: number;
   scored: boolean;
 };
 
 type DragonRing = {
-  body: Phaser.GameObjects.Arc;
+  body: Phaser.GameObjects.Image;
   radius: number;
   resolved: boolean;
 };
@@ -55,6 +55,11 @@ type StartRunDetail = {
 
 type PauseRunDetail = {
   reason: "ui" | "signal";
+};
+
+type PreviewLevelDetail = {
+  levelId: LevelId;
+  settings: LevelSettings;
 };
 
 export type TrajectoryPoint = {
@@ -120,6 +125,7 @@ const RACER_TRACKS = {
 
 export class FlyScene extends Phaser.Scene {
   private player!: Phaser.GameObjects.Image;
+  private ornithopterPedals!: Phaser.GameObjects.Graphics;
   private shadow!: Phaser.GameObjects.Ellipse;
   private skyBackdrop!: Phaser.GameObjects.Container;
   private spaceBackdrop!: Phaser.GameObjects.Container;
@@ -139,13 +145,25 @@ export class FlyScene extends Phaser.Scene {
   private stars: Phaser.GameObjects.Rectangle[] = [];
   private bubbles: Phaser.GameObjects.Arc[] = [];
   private dragonClouds: Phaser.GameObjects.Ellipse[] = [];
+  private seaMotes: Phaser.GameObjects.Arc[] = [];
+  private dragonMotes: Phaser.GameObjects.Arc[] = [];
+  private submarineParallaxLayers: Array<{
+    container: Phaser.GameObjects.Container;
+    speed: number;
+  }> = [];
+  private dragonParallaxLayers: Array<{
+    container: Phaser.GameObjects.Container;
+    speed: number;
+  }> = [];
   private racerPlayer!: Phaser.GameObjects.Container;
   private hillPlayer!: Phaser.GameObjects.Container;
-  private submarinePlayer!: Phaser.GameObjects.Container;
-  private dragonPlayer!: Phaser.GameObjects.Container;
+  private hillPedals?: Phaser.GameObjects.Graphics;
+  private submarinePlayer!: Phaser.GameObjects.Sprite;
+  private dragonPlayer!: Phaser.GameObjects.Sprite;
   private hillFarTerrain!: Phaser.GameObjects.Graphics;
   private hillMidTerrain!: Phaser.GameObjects.Graphics;
   private hillGround!: Phaser.GameObjects.Graphics;
+  private hillScenery: Phaser.GameObjects.Image[] = [];
   private raceRivals: RaceRival[] = [];
   private obstacles: ObstaclePair[] = [];
   private asteroids: AsteroidObstacle[] = [];
@@ -153,6 +171,9 @@ export class FlyScene extends Phaser.Scene {
   private dragonRings: DragonRing[] = [];
   private mapper?: EffortMapper;
   private powerW = 0;
+  private cadenceRpm?: number;
+  private displayedCadenceRpm = 0;
+  private pedalPhase = 0;
   private lastTelemetryAt = 0;
   private velocityY = 0;
   private running = false;
@@ -188,6 +209,34 @@ export class FlyScene extends Phaser.Scene {
 
   preload(): void {
     this.load.image("ornithopter", "assets/ornithopter.png");
+    this.load.spritesheet("submarine-dive", "assets/submarine-dive-sheet.png", {
+      frameWidth: 362,
+      frameHeight: 350,
+    });
+    this.load.spritesheet("dragon-flight", "assets/dragon-flight-sheet.png", {
+      frameWidth: 362,
+      frameHeight: 430,
+    });
+    this.load.spritesheet("gates", "assets/gates-sheet.png", {
+      frameWidth: 495,
+      frameHeight: 585,
+    });
+    this.load.spritesheet("asteroid-art", "assets/asteroids-sheet.png", {
+      frameWidth: 362,
+      frameHeight: 410,
+    });
+    this.load.spritesheet("sea-art", "assets/sea-sheet.png", {
+      frameWidth: 362,
+      frameHeight: 505,
+    });
+    this.load.spritesheet("dragon-world", "assets/dragon-world-sheet.png", {
+      frameWidth: 362,
+      frameHeight: 485,
+    });
+    this.load.spritesheet("hill-art", "assets/hills-sheet.png", {
+      frameWidth: 362,
+      frameHeight: 530,
+    });
   }
 
   create(): void {
@@ -198,12 +247,16 @@ export class FlyScene extends Phaser.Scene {
     // The generated sprite contains much finer detail than the logical game grid.
     // Linear filtering avoids nearest-neighbor shimmer while it is pitched in flight.
     this.textures.get("ornithopter").setFilter(Phaser.Textures.FilterMode.LINEAR);
+    this.textures.get("submarine-dive").setFilter(Phaser.Textures.FilterMode.LINEAR);
+    this.textures.get("dragon-flight").setFilter(Phaser.Textures.FilterMode.LINEAR);
     this.createBackdrops();
     this.shadow = this.add.ellipse(PLAYER_X, 158, 38, 5, 0x553a2c, 0.16);
     this.player = this.add
       .image(PLAYER_X, 88, "ornithopter")
       .setDisplaySize(PLAYER_WIDTH, PLAYER_HEIGHT);
     this.player.setOrigin(0.5);
+    this.ornithopterPedals = this.add.graphics().setPosition(PLAYER_X, 88).setDepth(2);
+    this.drawOrnithopterPedals();
     this.createRaceCars();
     this.createHillBike();
     this.createSubmarine();
@@ -211,6 +264,7 @@ export class FlyScene extends Phaser.Scene {
     this.setBackdrop("ornithopter-run");
 
     gameEvents.addEventListener("start-run", this.onStartRun);
+    gameEvents.addEventListener("preview-level", this.onPreviewLevel);
     gameEvents.addEventListener("telemetry", this.onTelemetry);
     gameEvents.addEventListener("pause-run", this.onPauseRun);
     gameEvents.addEventListener("resume-run", this.onResumeRun);
@@ -222,6 +276,7 @@ export class FlyScene extends Phaser.Scene {
   update(_time: number, delta: number): void {
     const dt = Math.min(delta, 50) / 1000;
     this.animateBackdrop(dt);
+    this.animateOrnithopterPedals(dt);
     if (!this.running || this.pausedForSignal || !this.mapper) return;
 
     this.elapsed += dt;
@@ -255,6 +310,9 @@ export class FlyScene extends Phaser.Scene {
       this.mode === "trace" ? Phaser.Math.Clamp(this.rawPlayerY, 10, HEIGHT - 20) : this.rawPlayerY;
     const targetPitch = Phaser.Math.Clamp(this.velocityY / 500, -0.25, 0.25);
     this.player.rotation = Math.round(targetPitch / PITCH_STEP) * PITCH_STEP;
+    this.ornithopterPedals
+      .setPosition(this.player.x, this.player.y)
+      .setRotation(this.player.rotation);
     if (this.levelId === "submarine-dive")
       this.submarinePlayer.setPosition(PLAYER_X, this.player.y).setRotation(this.player.rotation);
     if (this.levelId === "dragon-flight")
@@ -304,7 +362,7 @@ export class FlyScene extends Phaser.Scene {
 
     for (const pair of this.obstacles) {
       for (const part of [pair.top, pair.bottom, pair.topCap, pair.bottomCap]) part.x -= speed * dt;
-      if (!pair.scored && pair.top.x + pair.top.width / 2 < PLAYER_X) {
+      if (!pair.scored && pair.top.x + pair.top.displayWidth / 2 < PLAYER_X) {
         pair.scored = true;
         this.incrementScore();
       }
@@ -431,7 +489,7 @@ export class FlyScene extends Phaser.Scene {
     const currentGrade = hillGradePercent(currentWorldX, this.levelSettings.mapId);
     const terrainAngle = Math.atan(hillTerrainDerivative(currentWorldX, this.levelSettings.mapId));
     this.hillPlayer
-      .setPosition(HILL_PLAYER_X, hillTerrainY(currentWorldX, this.levelSettings.mapId) - 6)
+      .setPosition(HILL_PLAYER_X, hillTerrainY(currentWorldX, this.levelSettings.mapId) - 11)
       .setRotation(terrainAngle);
     this.drawHillLandscape();
 
@@ -450,9 +508,12 @@ export class FlyScene extends Phaser.Scene {
     this.drawDistantHillLayer(this.hillMidTerrain, this.hillDistance * 0.34, 132, 22, 0x557b56);
 
     const surface: Phaser.Math.Vector2[] = [];
-    for (let x = 0; x <= WIDTH; x += 4) {
+    for (let x = 0; x <= WIDTH; x += 3) {
       surface.push(
-        new Phaser.Math.Vector2(x, hillTerrainY(this.hillDistance + x, this.levelSettings.mapId)),
+        new Phaser.Math.Vector2(
+          x,
+          Math.round(hillTerrainY(this.hillDistance + x, this.levelSettings.mapId)),
+        ),
       );
     }
     this.hillGround.clear();
@@ -464,6 +525,12 @@ export class FlyScene extends Phaser.Scene {
       );
     this.hillGround.lineStyle(3, 0x87a94f).strokePoints(surface);
     this.hillGround.lineStyle(1, 0xd8c86e, 0.65);
+    for (let x = 2; x < WIDTH; x += 7) {
+      const surfaceY = Math.round(hillTerrainY(this.hillDistance + x, this.levelSettings.mapId));
+      const depth = 7 + ((x + Math.floor(this.hillDistance)) % 19);
+      this.hillGround.fillStyle(depth % 2 === 0 ? 0x5d7139 : 0x725936, 0.7);
+      this.hillGround.fillRect(x, surfaceY + depth, 2, 2);
+    }
     const firstMarker = Math.floor(this.hillDistance / 64);
     for (let marker = firstMarker; marker < firstMarker + 7; marker += 1) {
       const worldX = marker * 64 + 21;
@@ -473,6 +540,15 @@ export class FlyScene extends Phaser.Scene {
       const flowerColor = marker % 3 === 0 ? 0xf4d35e : marker % 3 === 1 ? 0xf2eee2 : 0xd96c75;
       this.hillGround.lineBetween(x, y, x, y - 5);
       this.hillGround.fillStyle(flowerColor).fillCircle(x, y - 6, 1.5);
+    }
+    const sceneryStart = Math.floor(this.hillDistance / 82);
+    for (const [index, scenery] of this.hillScenery.entries()) {
+      const marker = sceneryStart + index;
+      const worldX = marker * 82 + 42;
+      const x = worldX - this.hillDistance;
+      scenery
+        .setPosition(x, Math.round(hillTerrainY(worldX, this.levelSettings.mapId)) + 1)
+        .setVisible(x > -30 && x < WIDTH + 30);
     }
   }
 
@@ -515,6 +591,58 @@ export class FlyScene extends Phaser.Scene {
     if (this.levelSettings.optionId === "solo") return 0;
     if (this.levelSettings.optionId === "pack") return 5;
     return 3;
+  }
+
+  private animateOrnithopterPedals(dt: number): void {
+    const fallbackCadence =
+      this.powerW < 8 ? 0 : Phaser.Math.Clamp(38 + this.powerW * 0.23, 42, 112);
+    const targetCadence =
+      this.running && !this.pausedForSignal ? (this.cadenceRpm ?? fallbackCadence) : 0;
+    this.displayedCadenceRpm +=
+      (targetCadence - this.displayedCadenceRpm) * (1 - Math.exp(-dt / 0.22));
+    this.pedalPhase = Phaser.Math.Wrap(
+      this.pedalPhase + (this.displayedCadenceRpm / 60) * Math.PI * 2 * dt,
+      0,
+      Math.PI * 2,
+    );
+    this.drawOrnithopterPedals();
+  }
+
+  private drawOrnithopterPedals(): void {
+    this.drawPedalMechanism(this.ornithopterPedals);
+    if (this.hillPedals) this.drawPedalMechanism(this.hillPedals);
+  }
+
+  private drawPedalMechanism(graphics: Phaser.GameObjects.Graphics): void {
+    const crank = new Phaser.Math.Vector2(3.2, 11.1);
+    const hip = new Phaser.Math.Vector2(7.2, 3.8);
+    const crankX = Math.cos(this.pedalPhase) * 4.2;
+    const crankY = Math.sin(this.pedalPhase) * 3.2;
+    const frontFoot = new Phaser.Math.Vector2(crank.x + crankX, crank.y + crankY);
+    const rearFoot = new Phaser.Math.Vector2(crank.x - crankX, crank.y - crankY);
+    const kneeFor = (foot: Phaser.Math.Vector2, bend: number) =>
+      new Phaser.Math.Vector2(
+        Phaser.Math.Linear(hip.x, foot.x, 0.5) + bend,
+        Phaser.Math.Linear(hip.y, foot.y, 0.5) - 1.7,
+      );
+    const rearKnee = kneeFor(rearFoot, -1.5);
+    const frontKnee = kneeFor(frontFoot, 1.8);
+
+    graphics.clear();
+    graphics.lineStyle(2.1, 0x49362c, 0.9);
+    graphics.lineBetween(hip.x, hip.y, rearKnee.x, rearKnee.y);
+    graphics.lineBetween(rearKnee.x, rearKnee.y, rearFoot.x, rearFoot.y);
+    graphics.lineStyle(1.2, 0xa66c2f, 0.95);
+    graphics.strokeCircle(crank.x, crank.y, 3.8);
+    graphics.lineBetween(crank.x, crank.y, rearFoot.x, rearFoot.y);
+    graphics.lineStyle(2.5, 0x604536, 1);
+    graphics.lineBetween(hip.x, hip.y, frontKnee.x, frontKnee.y);
+    graphics.lineStyle(2.2, 0x9a5b32, 1);
+    graphics.lineBetween(frontKnee.x, frontKnee.y, frontFoot.x, frontFoot.y);
+    graphics.lineStyle(1.3, 0xd1a44d, 1);
+    graphics.lineBetween(crank.x, crank.y, frontFoot.x, frontFoot.y);
+    graphics.fillStyle(0x332820, 1).fillCircle(frontFoot.x, frontFoot.y, 1.2);
+    graphics.fillCircle(rearFoot.x, rearFoot.y, 1);
   }
 
   private createBackdrops(): void {
@@ -666,6 +794,23 @@ export class FlyScene extends Phaser.Scene {
       this.hillGround,
     ];
     this.hillMapOverlay = this.add.rectangle(160, 90, WIDTH, HEIGHT, 0xffffff, 0);
+    const hillSizes: Array<[number, number]> = [
+      [24, 38],
+      [34, 35],
+      [28, 25],
+      [35, 28],
+      [22, 24],
+    ];
+    for (let index = 0; index < 7; index += 1) {
+      const frame = (index % 5) + 1;
+      const [width, height] = hillSizes[frame - 1]!;
+      const scenery = this.add
+        .image(0, 0, "hill-art", frame)
+        .setDisplaySize(width, height)
+        .setOrigin(0.5, 1);
+      this.hillScenery.push(scenery);
+      hillObjects.push(scenery);
+    }
     hillObjects.push(this.hillMapOverlay);
     this.hillBackdrop = this.add.container(0, 0, hillObjects).setDepth(-10);
     this.drawHillLandscape();
@@ -679,10 +824,44 @@ export class FlyScene extends Phaser.Scene {
       this.add.triangle(210, 88, 0, 0, 32, 0, 88, 88, 0x9ee3dc, 0.07),
       this.add.rectangle(160, 173, WIDTH, 18, 0x806f55),
     ];
+    const distantReef = this.add.container();
+    const nearReef = this.add.container();
+    for (const tileX of [0, WIDTH]) {
+      for (let index = 0; index < 7; index += 1) {
+        distantReef.add(
+          this.add.ellipse(
+            tileX + index * 52,
+            151 + (index % 2) * 5,
+            68,
+            24,
+            index % 2 === 0 ? 0x16485b : 0x1d5962,
+            0.66,
+          ),
+        );
+      }
+      for (let index = 0; index < 12; index += 1) {
+        const x = tileX + index * 29;
+        nearReef.add(this.add.triangle(x, 176, 0, 28, 6, 0, 13, 28, 0x244b42, 0.9));
+        if (index % 3 === 0) nearReef.add(this.add.circle(x + 11, 166, 4, 0xb85c67, 0.72));
+      }
+    }
+    this.submarineParallaxLayers = [
+      { container: distantReef, speed: 2.2 },
+      { container: nearReef, speed: 7.5 },
+    ];
     for (let index = 0; index < 9; index += 1) {
       const x = 12 + index * 39;
       submarineObjects.push(this.add.triangle(x, 165, 0, 14, 5, 0, 10, 14, 0x397052));
       submarineObjects.push(this.add.circle(x + 12, 169, 3 + (index % 3), 0xa55a58, 0.8));
+    }
+    for (let index = 0; index < 8; index += 1) {
+      const frame = (index % 5) + 1;
+      const scenery = this.add
+        .image(index * 48 + 10, 172, "sea-art", frame)
+        .setDisplaySize(frame === 3 ? 30 : 22, frame === 3 ? 36 : 29)
+        .setOrigin(0.5, 1)
+        .setAlpha(index % 2 === 0 ? 0.72 : 0.9);
+      (index % 2 === 0 ? distantReef : nearReef).add(scenery);
     }
     for (let index = 0; index < 24; index += 1) {
       const bubble = this.add.circle(
@@ -696,8 +875,20 @@ export class FlyScene extends Phaser.Scene {
       this.bubbles.push(bubble);
       submarineObjects.push(bubble);
     }
+    for (let index = 0; index < 34; index += 1) {
+      const mote = this.add.circle(
+        Phaser.Math.Between(0, WIDTH),
+        Phaser.Math.Between(12, HEIGHT - 12),
+        index % 8 === 0 ? 0.8 : 0.45,
+        0xc6eee0,
+        0.18 + (index % 4) * 0.05,
+      );
+      mote.setData("drift", 3 + (index % 6));
+      this.seaMotes.push(mote);
+      submarineObjects.push(mote);
+    }
     this.submarineMapOverlay = this.add.rectangle(160, 90, WIDTH, HEIGHT, 0xffffff, 0);
-    submarineObjects.push(this.submarineMapOverlay);
+    submarineObjects.push(distantReef, nearReef, this.submarineMapOverlay);
     this.submarineBackdrop = this.add.container(0, 0, submarineObjects).setDepth(-10);
 
     const dragonObjects: Phaser.GameObjects.GameObject[] = [
@@ -711,14 +902,65 @@ export class FlyScene extends Phaser.Scene {
       this.add.rectangle(266, 143, 8, 23, 0x675260),
       this.add.rectangle(288, 143, 8, 23, 0x675260),
     ];
+    const farDragonPeaks = this.add.container();
+    const nearDragonPeaks = this.add.container();
+    for (const tileX of [0, WIDTH]) {
+      for (let index = 0; index < 5; index += 1) {
+        farDragonPeaks.add(
+          this.add.triangle(tileX + index * 78 - 20, 160, 0, 54, 48, 0, 96, 54, 0x718774, 0.58),
+        );
+      }
+      for (let index = 0; index < 6; index += 1) {
+        nearDragonPeaks.add(
+          this.add.triangle(
+            tileX + index * 64 - 25,
+            176,
+            0,
+            46,
+            40,
+            0,
+            80,
+            46,
+            index % 2 === 0 ? 0x465f4b : 0x526b50,
+            0.9,
+          ),
+        );
+      }
+    }
+    this.dragonParallaxLayers = [
+      { container: farDragonPeaks, speed: 2.4 },
+      { container: nearDragonPeaks, speed: 6.4 },
+    ];
     for (let index = 0; index < 7; index += 1) {
       const cloud = this.add.ellipse(25 + index * 55, 29 + (index % 3) * 20, 38, 9, 0xf5ead4, 0.55);
       cloud.setData("drift", 2 + (index % 3));
       this.dragonClouds.push(cloud);
       dragonObjects.push(cloud);
     }
+    for (let index = 0; index < 6; index += 1) {
+      const frame = (index % 3) + 3;
+      const scenery = this.add
+        .image(index * 68 + 18, frame === 5 ? 136 : 166, "dragon-world", frame)
+        .setDisplaySize(frame === 5 ? 40 : 25, frame === 5 ? 34 : 36)
+        .setOrigin(0.5, 1)
+        .setAlpha(index % 2 === 0 ? 0.66 : 0.88);
+      (index % 2 === 0 ? farDragonPeaks : nearDragonPeaks).add(scenery);
+    }
+    for (let index = 0; index < 22; index += 1) {
+      const mote = this.add.circle(
+        Phaser.Math.Between(0, WIDTH),
+        Phaser.Math.Between(8, HEIGHT - 18),
+        index % 6 === 0 ? 1.1 : 0.65,
+        index % 3 === 0 ? 0xffd57b : 0xf5efe1,
+        0.3,
+      );
+      mote.setData("drift", 4 + (index % 5) * 1.5);
+      mote.setData("phase", index * 0.7);
+      this.dragonMotes.push(mote);
+      dragonObjects.push(mote);
+    }
     this.dragonMapOverlay = this.add.rectangle(160, 90, WIDTH, HEIGHT, 0xffffff, 0);
-    dragonObjects.push(this.dragonMapOverlay);
+    dragonObjects.push(farDragonPeaks, nearDragonPeaks, this.dragonMapOverlay);
     this.dragonBackdrop = this.add.container(0, 0, dragonObjects).setDepth(-10);
   }
 
@@ -764,64 +1006,38 @@ export class FlyScene extends Phaser.Scene {
   }
 
   private createHillBike(): void {
-    const wheels = [
-      this.add.circle(-8, 0, 5, 0x263037).setStrokeStyle(1, 0xd8caa0),
-      this.add.circle(8, 0, 5, 0x263037).setStrokeStyle(1, 0xd8caa0),
-    ];
-    const frame = this.add.graphics();
-    frame.lineStyle(2, 0xb33f32).lineBetween(-8, 0, -1, -6);
-    frame.lineBetween(-1, -6, 5, 0);
-    frame.lineBetween(5, 0, -8, 0);
-    frame.lineBetween(-1, -6, 8, 0);
-    frame.lineStyle(1, 0x36251d).lineBetween(-2, -8, 2, -8);
-    frame.lineBetween(7, -5, 10, -6);
-    frame.lineBetween(7, -5, 8, 0);
-    const rider = this.add.graphics();
-    rider.fillStyle(0x435f8a).fillCircle(-1, -12, 3);
-    rider.lineStyle(2, 0x594337).lineBetween(-1, -9, 2, -4);
-    rider.lineBetween(2, -4, 7, -5);
-    rider.lineBetween(2, -4, -1, -6);
-    this.hillPlayer = this.add.container(HILL_PLAYER_X, 100, [...wheels, frame, rider]);
+    const ornithopter = this.add.image(0, 0, "ornithopter").setDisplaySize(38, 25).setOrigin(0.5);
+    this.hillPedals = this.add.graphics().setScale(38 / PLAYER_WIDTH);
+    this.drawPedalMechanism(this.hillPedals);
+    this.hillPlayer = this.add.container(HILL_PLAYER_X, 100, [ornithopter, this.hillPedals]);
     this.hillPlayer.setVisible(false);
   }
 
   private createSubmarine(): void {
-    const hull = this.add.ellipse(0, 0, 34, 15, 0xd6a847).setStrokeStyle(2, 0x6c5332);
-    const tower = this.add.rectangle(-2, -9, 10, 6, 0xb98736).setStrokeStyle(1, 0x5b472f);
-    const periscope = this.add.rectangle(0, -14, 2, 7, 0x5b472f);
-    const fin = this.add.triangle(-18, 0, 0, 7, 0, 0, 7, 3, 0xb98736);
-    const propeller = this.add.rectangle(-21, 0, 2, 12, 0x7e6744);
-    const windows = [-8, 2, 11].map((x) =>
-      this.add.circle(x, 0, 2.2, 0x9be1df).setStrokeStyle(1, 0x4f6f71),
-    );
-    this.submarinePlayer = this.add.container(PLAYER_X, 88, [
-      fin,
-      propeller,
-      hull,
-      tower,
-      periscope,
-      ...windows,
-    ]);
+    this.anims.create({
+      key: "submarine-pedal",
+      frames: this.anims.generateFrameNumbers("submarine-dive", { start: 0, end: 5 }),
+      frameRate: 9,
+      repeat: -1,
+    });
+    this.submarinePlayer = this.add
+      .sprite(PLAYER_X, 88, "submarine-dive", 0)
+      .setDisplaySize(64, 62)
+      .play("submarine-pedal");
     this.submarinePlayer.setVisible(false);
   }
 
   private createDragon(): void {
-    const tail = this.add.triangle(-18, 2, 0, 4, 14, 0, 14, 8, 0x94484a);
-    const body = this.add.ellipse(-2, 0, 28, 13, 0xa84e4d).setStrokeStyle(1, 0x60332f);
-    const head = this.add.circle(13, -3, 6, 0xb95c4d).setStrokeStyle(1, 0x60332f);
-    const snout = this.add.rectangle(18, -1, 7, 4, 0xc36e51);
-    const upperWing = this.add.triangle(-5, -4, 0, 16, 9, 0, 20, 14, 0xd88b63, 0.9);
-    const lowerWing = this.add.triangle(-4, 4, 0, 0, 10, 14, 21, 1, 0x7f3942, 0.85);
-    const eye = this.add.circle(15, -5, 1, 0xffe795);
-    this.dragonPlayer = this.add.container(PLAYER_X, 88, [
-      tail,
-      lowerWing,
-      body,
-      upperWing,
-      head,
-      snout,
-      eye,
-    ]);
+    this.anims.create({
+      key: "dragon-pedal",
+      frames: this.anims.generateFrameNumbers("dragon-flight", { start: 0, end: 5 }),
+      frameRate: 8,
+      repeat: -1,
+    });
+    this.dragonPlayer = this.add
+      .sprite(PLAYER_X, 88, "dragon-flight", 0)
+      .setDisplaySize(72, 86)
+      .play("dragon-pedal");
     this.dragonPlayer.setVisible(false);
   }
 
@@ -891,20 +1107,41 @@ export class FlyScene extends Phaser.Scene {
       }
     }
     if (this.submarineBackdrop.visible) {
+      for (const layer of this.submarineParallaxLayers) {
+        layer.container.x -= layer.speed * dt;
+        if (layer.container.x <= -WIDTH) layer.container.x += WIDTH;
+      }
       for (const bubble of this.bubbles) {
         bubble.y -= (bubble.getData("rise") as number) * dt;
         if (bubble.y < 12) bubble.y = HEIGHT - 14;
       }
+      for (const mote of this.seaMotes) {
+        mote.x -= (mote.getData("drift") as number) * dt;
+        mote.y -= 0.8 * dt;
+        if (mote.x < -2) mote.x = WIDTH + 2;
+        if (mote.y < 8) mote.y = HEIGHT - 10;
+      }
     }
     if (this.dragonBackdrop.visible) {
+      for (const layer of this.dragonParallaxLayers) {
+        layer.container.x -= layer.speed * dt;
+        if (layer.container.x <= -WIDTH) layer.container.x += WIDTH;
+      }
       for (const cloud of this.dragonClouds) {
         cloud.x -= (cloud.getData("drift") as number) * dt;
         if (cloud.x < -22) cloud.x = WIDTH + 22;
+      }
+      for (const mote of this.dragonMotes) {
+        mote.x -= (mote.getData("drift") as number) * dt;
+        mote.y += Math.sin(this.elapsed * 2 + (mote.getData("phase") as number)) * dt * 1.3;
+        if (mote.x < -2) mote.x = WIDTH + 2;
       }
     }
   }
 
   private setBackdrop(levelId: LevelId): void {
+    this.game.canvas.dataset.level = levelId;
+    this.game.canvas.dataset.map = this.levelSettings.mapId;
     const inSpace = levelId === "asteroids";
     const onTrack = levelId === "racer";
     const inHills = levelId === "hill-climber";
@@ -918,6 +1155,9 @@ export class FlyScene extends Phaser.Scene {
     this.dragonBackdrop.setVisible(dragonSky);
     this.shadow.setVisible(!inSpace && !onTrack && !inHills && !underwater && !dragonSky);
     this.player.setVisible(!onTrack && !inHills && !underwater && !dragonSky);
+    this.ornithopterPedals.setVisible(
+      !inSpace && !onTrack && !inHills && !underwater && !dragonSky,
+    );
     this.racerPlayer.setVisible(onTrack);
     for (const [index, rival] of this.raceRivals.entries()) {
       rival.body.setVisible(onTrack && index < this.activeRivalCount());
@@ -982,6 +1222,7 @@ export class FlyScene extends Phaser.Scene {
       .setPosition(PLAYER_X, 88)
       .setDisplaySize(PLAYER_WIDTH, PLAYER_HEIGHT)
       .setRotation(0);
+    this.ornithopterPedals.setPosition(PLAYER_X, 88).setRotation(0).setAlpha(1);
     this.submarinePlayer.setPosition(PLAYER_X, 88).setRotation(0).setAlpha(1);
     this.dragonPlayer.setPosition(PLAYER_X, 88).setRotation(0).setAlpha(1);
     this.racerProgress = 0;
@@ -1002,7 +1243,7 @@ export class FlyScene extends Phaser.Scene {
     this.hillPlayer.setAlpha(1);
     const hillWorldX = this.hillDistance + HILL_PLAYER_X;
     this.hillPlayer
-      .setPosition(HILL_PLAYER_X, hillTerrainY(hillWorldX, this.levelSettings.mapId) - 6)
+      .setPosition(HILL_PLAYER_X, hillTerrainY(hillWorldX, this.levelSettings.mapId) - 11)
       .setRotation(Math.atan(hillTerrainDerivative(hillWorldX, this.levelSettings.mapId)));
     this.drawHillLandscape();
     this.setBackdrop(levelId);
@@ -1020,9 +1261,38 @@ export class FlyScene extends Phaser.Scene {
     emitGameEvent("score", 0);
   };
 
+  private readonly onPreviewLevel = (event: Event): void => {
+    if (this.running) return;
+    const { levelId, settings } = (event as CustomEvent<PreviewLevelDetail>).detail;
+    this.levelId = levelId;
+    this.levelSettings = settings;
+    this.applyMapTheme();
+    if (levelId === "racer") {
+      this.drawRacerTrack();
+      this.racerProgress = 0;
+      this.racerLane = 0;
+      this.positionRaceCar(this.racerPlayer, 0, 0);
+    } else if (levelId === "hill-climber") {
+      this.hillDistance = 0;
+      this.drawHillLandscape();
+      const worldX = HILL_PLAYER_X;
+      this.hillPlayer
+        .setPosition(HILL_PLAYER_X, hillTerrainY(worldX, settings.mapId) - 11)
+        .setRotation(Math.atan(hillTerrainDerivative(worldX, settings.mapId)));
+    }
+    this.player.setPosition(PLAYER_X, 88).setRotation(0);
+    this.ornithopterPedals.setPosition(PLAYER_X, 88).setRotation(0);
+    this.submarinePlayer.setPosition(PLAYER_X, 88).setRotation(0).setAlpha(1);
+    this.dragonPlayer.setPosition(PLAYER_X, 88).setRotation(0).setAlpha(1);
+    this.setBackdrop(levelId);
+  };
+
   private readonly onTelemetry = (event: Event): void => {
-    const detail = (event as CustomEvent<{ powerW: number; timestamp: number }>).detail;
+    const detail = (
+      event as CustomEvent<{ powerW: number; cadenceRpm?: number; timestamp: number }>
+    ).detail;
     this.powerW = detail.powerW;
+    this.cadenceRpm = detail.cadenceRpm;
     this.lastTelemetryAt = performance.now();
     if (this.pausedForSignal && this.waitingForSignal) {
       this.waitingForSignal = false;
@@ -1052,6 +1322,9 @@ export class FlyScene extends Phaser.Scene {
     this.clearObstacles();
     this.rawPlayerY = 88;
     this.player.setPosition(PLAYER_X, 88).setRotation(0);
+    this.ornithopterPedals.setPosition(PLAYER_X, 88).setRotation(0);
+    this.cadenceRpm = undefined;
+    this.displayedCadenceRpm = 0;
     this.levelId = "ornithopter-run";
     this.setBackdrop(this.levelId);
   };
@@ -1085,20 +1358,26 @@ export class FlyScene extends Phaser.Scene {
     const topHeight = gapY - gap / 2;
     const bottomY = gapY + gap / 2;
     const bottomHeight = HEIGHT - bottomY;
-    const color = 0x66513e;
-    const capColor = 0xc19a5b;
     const upperGateEnabled = this.levelSettings.modifierId !== "upper-off";
     const top = this.add
-      .rectangle(x, topHeight / 2, width, topHeight, color)
+      .image(x, topHeight / 2, "gates", courseIndex % 2)
+      .setDisplaySize(width, Math.max(2, topHeight))
+      .setFlipY(true)
       .setVisible(upperGateEnabled);
     const topCap = this.add
-      .rectangle(x, topHeight - 3, width + 7, 6, capColor)
+      .image(x, topHeight - 3, "gates", 2 + (courseIndex % 2))
+      .setDisplaySize(width + 9, 9)
+      .setFlipY(true)
       .setVisible(upperGateEnabled);
     this.obstacles.push({
       top,
-      bottom: this.add.rectangle(x, bottomY + bottomHeight / 2, width, bottomHeight, color),
+      bottom: this.add
+        .image(x, bottomY + bottomHeight / 2, "gates", courseIndex % 2)
+        .setDisplaySize(width, Math.max(2, bottomHeight)),
       topCap,
-      bottomCap: this.add.rectangle(x, bottomY + 3, width + 7, 6, capColor),
+      bottomCap: this.add
+        .image(x, bottomY + 3, "gates", 2 + (courseIndex % 2))
+        .setDisplaySize(width + 9, 9),
       scored: false,
     });
   }
@@ -1111,35 +1390,14 @@ export class FlyScene extends Phaser.Scene {
           ? [15, 22]
           : [10, 19];
     const radius = Phaser.Math.Between(minimumRadius, maximumRadius);
-    const rock = this.add
-      .circle(0, 0, radius, Phaser.Math.RND.pick([0x6f6b76, 0x817768, 0x5f6672]))
-      .setStrokeStyle(2, 0xb0a58e, 0.8);
-    const craterOne = this.add.circle(
-      -radius * 0.28,
-      -radius * 0.2,
-      Math.max(2, radius * 0.2),
-      0x3e414c,
-      0.72,
-    );
-    const craterTwo = this.add.circle(
-      radius * 0.3,
-      radius * 0.24,
-      Math.max(1.5, radius * 0.13),
-      0x47434a,
-      0.65,
-    );
-    const highlight = this.add.circle(
-      radius * 0.25,
-      -radius * 0.32,
-      Math.max(1, radius * 0.1),
-      0xd0c49f,
-      0.55,
-    );
-    const body = this.add.container(
-      WIDTH + radius + 5,
-      Phaser.Math.Between(radius + 4, HEIGHT - radius - 4),
-      [rock, craterOne, craterTwo, highlight],
-    );
+    const body = this.add
+      .image(
+        WIDTH + radius + 5,
+        Phaser.Math.Between(radius + 4, HEIGHT - radius - 4),
+        "asteroid-art",
+        Phaser.Math.Between(0, 5),
+      )
+      .setDisplaySize(radius * 2.45, radius * 2.45);
     body.rotation = Phaser.Math.FloatBetween(-Math.PI, Math.PI);
     this.asteroids.push({
       body,
@@ -1156,35 +1414,15 @@ export class FlyScene extends Phaser.Scene {
         : this.levelSettings.optionId;
     const isMine = selectedType !== "reefs";
     const radius = isMine ? 10 : 14;
-    const pieces: Phaser.GameObjects.GameObject[] = [];
-    if (isMine) {
-      pieces.push(this.add.circle(0, 0, radius, 0x3d4850).setStrokeStyle(2, 0x89959a));
-      pieces.push(this.add.circle(-3, -2, 2, 0xaab4b2, 0.45));
-      for (let index = 0; index < 8; index += 1) {
-        const angle = (index / 8) * Math.PI * 2;
-        pieces.push(
-          this.add
-            .rectangle(
-              Math.cos(angle) * (radius + 2),
-              Math.sin(angle) * (radius + 2),
-              6,
-              2,
-              0x67747a,
-            )
-            .setRotation(angle),
-        );
-      }
-    } else {
-      pieces.push(this.add.ellipse(0, 5, 26, 12, 0x6c6657));
-      pieces.push(this.add.triangle(-7, 0, 0, 18, 5, 0, 10, 18, 0xce6b61));
-      pieces.push(this.add.triangle(3, 1, 0, 17, 6, 0, 12, 17, 0xd88d5b));
-      pieces.push(this.add.circle(8, 2, 4, 0x8b5aa1));
-    }
-    const body = this.add.container(
-      WIDTH + radius + 6,
-      Phaser.Math.Between(radius + 12, HEIGHT - radius - 16),
-      pieces,
-    );
+    const frame = isMine ? 0 : Phaser.Math.Between(1, 2);
+    const body = this.add
+      .image(
+        WIDTH + radius + 6,
+        Phaser.Math.Between(radius + 12, HEIGHT - radius - 16),
+        "sea-art",
+        frame,
+      )
+      .setDisplaySize(radius * 2.5, radius * 2.8);
     this.seaObstacles.push({ body, radius, scored: false });
   }
 
@@ -1211,15 +1449,15 @@ export class FlyScene extends Phaser.Scene {
     } else {
       y = Phaser.Math.Between(Math.ceil(minimumY), Math.floor(maximumY));
     }
-    const color =
+    const frame =
       this.levelSettings.mapId === "volcanic-sky"
-        ? 0xffc35d
+        ? 2
         : this.levelSettings.mapId === "moon-kingdom"
-          ? 0xbad8ff
-          : 0xf0d06c;
+          ? 1
+          : 0;
     const body = this.add
-      .circle(WIDTH + radius + 6, y, radius, color, 0.12)
-      .setStrokeStyle(5, color);
+      .image(WIDTH + radius + 6, y, "dragon-world", frame)
+      .setDisplaySize(radius * 2.35, radius * 2.35);
     this.dragonRings.push({ body, radius, resolved: false });
   }
 
