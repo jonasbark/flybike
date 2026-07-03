@@ -213,8 +213,8 @@ export class FlyScene extends Phaser.Scene {
       frameWidth: 362,
       frameHeight: 350,
     });
-    this.load.spritesheet("dragon-flight", "assets/dragon-flight-sheet.png", {
-      frameWidth: 362,
+    this.load.spritesheet("dragon-flight", "assets/dragon-flight-sheet-v2.png", {
+      frameWidth: 430,
       frameHeight: 430,
     });
     this.load.spritesheet("gates", "assets/gates-sheet.png", {
@@ -249,6 +249,7 @@ export class FlyScene extends Phaser.Scene {
     this.textures.get("ornithopter").setFilter(Phaser.Textures.FilterMode.LINEAR);
     this.textures.get("submarine-dive").setFilter(Phaser.Textures.FilterMode.LINEAR);
     this.textures.get("dragon-flight").setFilter(Phaser.Textures.FilterMode.LINEAR);
+    this.createTrimmedGateFrames();
     this.createBackdrops();
     this.shadow = this.add.ellipse(PLAYER_X, 158, 38, 5, 0x553a2c, 0.16);
     this.player = this.add
@@ -298,6 +299,9 @@ export class FlyScene extends Phaser.Scene {
     const velocityEase = 1 - Math.exp(-delta / this.velocityResponseMs);
     this.velocityY += (targetVelocity - this.velocityY) * velocityEase;
     this.rawPlayerY += this.velocityY * dt;
+    if (this.levelId === "asteroids") {
+      this.rawPlayerY = Phaser.Math.Wrap(this.rawPlayerY, 0, HEIGHT);
+    }
     if (
       this.levelId === "ornithopter-run" &&
       this.levelSettings.modifierId === "upper-off" &&
@@ -316,7 +320,7 @@ export class FlyScene extends Phaser.Scene {
     if (this.levelId === "submarine-dive")
       this.submarinePlayer.setPosition(PLAYER_X, this.player.y).setRotation(this.player.rotation);
     if (this.levelId === "dragon-flight")
-      this.dragonPlayer.setPosition(PLAYER_X, this.player.y).setRotation(this.player.rotation);
+      this.alignDragonPlayer(this.player.y, this.player.rotation);
     this.shadow.scaleX = Phaser.Math.Clamp(1.25 - this.player.y / HEIGHT, 0.35, 1);
     this.shadow.alpha = Phaser.Math.Clamp(this.player.y / HEIGHT / 4, 0.05, 0.2);
 
@@ -525,9 +529,12 @@ export class FlyScene extends Phaser.Scene {
       );
     this.hillGround.lineStyle(3, 0x87a94f).strokePoints(surface);
     this.hillGround.lineStyle(1, 0xd8c86e, 0.65);
-    for (let x = 2; x < WIDTH; x += 7) {
-      const surfaceY = Math.round(hillTerrainY(this.hillDistance + x, this.levelSettings.mapId));
-      const depth = 7 + ((x + Math.floor(this.hillDistance)) % 19);
+    const firstSoilMarker = Math.floor(this.hillDistance / 7);
+    for (let marker = firstSoilMarker; marker < firstSoilMarker + 48; marker += 1) {
+      const worldX = marker * 7 + 2;
+      const x = Math.round(worldX - this.hillDistance);
+      const surfaceY = Math.round(hillTerrainY(worldX, this.levelSettings.mapId));
+      const depth = 7 + this.stableHash(marker * 13 + 5, 19);
       this.hillGround.fillStyle(depth % 2 === 0 ? 0x5d7139 : 0x725936, 0.7);
       this.hillGround.fillRect(x, surfaceY + depth, 2, 2);
     }
@@ -546,10 +553,31 @@ export class FlyScene extends Phaser.Scene {
       const marker = sceneryStart + index;
       const worldX = marker * 82 + 42;
       const x = worldX - this.hillDistance;
+      const frame = this.stableHash(marker * 29 + 11, 5) + 1;
+      const [width, height] = this.hillScenerySize(frame);
       scenery
+        .setFrame(frame)
+        .setDisplaySize(width, height)
         .setPosition(x, Math.round(hillTerrainY(worldX, this.levelSettings.mapId)) + 1)
         .setVisible(x > -30 && x < WIDTH + 30);
     }
+  }
+
+  private stableHash(value: number, modulus: number): number {
+    const mixed = Math.imul(value ^ (value >>> 16), 0x45d9f3b);
+    return Math.abs(mixed ^ (mixed >>> 16)) % modulus;
+  }
+
+  private hillScenerySize(frame: number): [number, number] {
+    return (
+      [
+        [24, 38],
+        [34, 35],
+        [28, 25],
+        [35, 28],
+        [22, 24],
+      ] as Array<[number, number]>
+    )[frame - 1]!;
   }
 
   private drawDistantHillLayer(
@@ -591,6 +619,21 @@ export class FlyScene extends Phaser.Scene {
     if (this.levelSettings.optionId === "solo") return 0;
     if (this.levelSettings.optionId === "pack") return 5;
     return 3;
+  }
+
+  private createTrimmedGateFrames(): void {
+    const texture = this.textures.get("gates");
+    const trims = [
+      ["wood-pillar", 0, 145, 17, 248, 548],
+      ["stone-pillar", 1, 47, 17, 448, 548],
+      ["wood-cap", 2, 0, 195, 495, 237],
+      ["stone-cap", 3, 0, 196, 385, 239],
+    ] as const;
+    for (const [name, frameIndex, x, y, width, height] of trims) {
+      if (texture.has(name)) continue;
+      const frame = texture.get(frameIndex);
+      texture.add(name, 0, frame.cutX + x, frame.cutY + y, width, height);
+    }
   }
 
   private animateOrnithopterPedals(dt: number): void {
@@ -794,16 +837,9 @@ export class FlyScene extends Phaser.Scene {
       this.hillGround,
     ];
     this.hillMapOverlay = this.add.rectangle(160, 90, WIDTH, HEIGHT, 0xffffff, 0);
-    const hillSizes: Array<[number, number]> = [
-      [24, 38],
-      [34, 35],
-      [28, 25],
-      [35, 28],
-      [22, 24],
-    ];
     for (let index = 0; index < 7; index += 1) {
       const frame = (index % 5) + 1;
-      const [width, height] = hillSizes[frame - 1]!;
+      const [width, height] = this.hillScenerySize(frame);
       const scenery = this.add
         .image(0, 0, "hill-art", frame)
         .setDisplaySize(width, height)
@@ -1036,9 +1072,17 @@ export class FlyScene extends Phaser.Scene {
     });
     this.dragonPlayer = this.add
       .sprite(PLAYER_X, 88, "dragon-flight", 0)
-      .setDisplaySize(72, 86)
+      .setDisplaySize(68, 68)
       .play("dragon-pedal");
+    this.alignDragonPlayer(88, 0);
     this.dragonPlayer.setVisible(false);
+  }
+
+  private alignDragonPlayer(y: number, rotation: number): void {
+    this.dragonPlayer
+      .setOrigin(245 / 430, 270 / 430)
+      .setPosition(PLAYER_X, y)
+      .setRotation(rotation);
   }
 
   private createRaceCar(color: number): Phaser.GameObjects.Container {
@@ -1224,7 +1268,8 @@ export class FlyScene extends Phaser.Scene {
       .setRotation(0);
     this.ornithopterPedals.setPosition(PLAYER_X, 88).setRotation(0).setAlpha(1);
     this.submarinePlayer.setPosition(PLAYER_X, 88).setRotation(0).setAlpha(1);
-    this.dragonPlayer.setPosition(PLAYER_X, 88).setRotation(0).setAlpha(1);
+    this.alignDragonPlayer(88, 0);
+    this.dragonPlayer.setAlpha(1);
     this.racerProgress = 0;
     this.racerSpeed = 0;
     this.racerLane = 0;
@@ -1283,7 +1328,8 @@ export class FlyScene extends Phaser.Scene {
     this.player.setPosition(PLAYER_X, 88).setRotation(0);
     this.ornithopterPedals.setPosition(PLAYER_X, 88).setRotation(0);
     this.submarinePlayer.setPosition(PLAYER_X, 88).setRotation(0).setAlpha(1);
-    this.dragonPlayer.setPosition(PLAYER_X, 88).setRotation(0).setAlpha(1);
+    this.alignDragonPlayer(88, 0);
+    this.dragonPlayer.setAlpha(1);
     this.setBackdrop(levelId);
   };
 
@@ -1358,25 +1404,26 @@ export class FlyScene extends Phaser.Scene {
     const topHeight = gapY - gap / 2;
     const bottomY = gapY + gap / 2;
     const bottomHeight = HEIGHT - bottomY;
+    const gateStyle = courseIndex % 2 === 0 ? "wood" : "stone";
     const upperGateEnabled = this.levelSettings.modifierId !== "upper-off";
     const top = this.add
-      .image(x, topHeight / 2, "gates", courseIndex % 2)
+      .image(x, topHeight / 2, "gates", `${gateStyle}-pillar`)
       .setDisplaySize(width, Math.max(2, topHeight))
       .setFlipY(true)
       .setVisible(upperGateEnabled);
     const topCap = this.add
-      .image(x, topHeight - 3, "gates", 2 + (courseIndex % 2))
+      .image(x, topHeight, "gates", `${gateStyle}-cap`)
       .setDisplaySize(width + 9, 9)
       .setFlipY(true)
       .setVisible(upperGateEnabled);
     this.obstacles.push({
       top,
       bottom: this.add
-        .image(x, bottomY + bottomHeight / 2, "gates", courseIndex % 2)
+        .image(x, bottomY + bottomHeight / 2, "gates", `${gateStyle}-pillar`)
         .setDisplaySize(width, Math.max(2, bottomHeight)),
       topCap,
       bottomCap: this.add
-        .image(x, bottomY + 3, "gates", 2 + (courseIndex % 2))
+        .image(x, bottomY, "gates", `${gateStyle}-cap`)
         .setDisplaySize(width + 9, 9),
       scored: false,
     });
@@ -1498,7 +1545,10 @@ export class FlyScene extends Phaser.Scene {
     const bottomBoundary = usesFullHeight ? HEIGHT : HEIGHT - 15;
     const upperBoundaryEnabled =
       this.levelId !== "ornithopter-run" || this.levelSettings.modifierId !== "upper-off";
-    if ((upperBoundaryEnabled && playerBounds.top <= 0) || playerBounds.bottom >= bottomBoundary)
+    if (
+      this.levelId !== "asteroids" &&
+      ((upperBoundaryEnabled && playerBounds.top <= 0) || playerBounds.bottom >= bottomBoundary)
+    )
       return true;
     if (this.levelId === "asteroids") {
       return this.asteroids.some((asteroid) =>
