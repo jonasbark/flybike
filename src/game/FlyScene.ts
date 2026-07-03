@@ -77,6 +77,7 @@ const PLAYER_HEIGHT = 44;
 const PITCH_STEP = Phaser.Math.DegToRad(2);
 const HILL_PLAYER_X = 76;
 const DRAGON_RUN_SECONDS = 5 * 60;
+const DRAGON_RING_COLLECTION_MARGIN = 6;
 const RACER_TRACKS = {
   "meadow-circuit": [
     { x: 55, y: 143 },
@@ -429,7 +430,8 @@ export class FlyScene extends Phaser.Scene {
         ring.resolved = true;
         const playerHalfHeight = this.trainerRun ? 7 : 9;
         const passedThrough =
-          Math.abs(this.player.y - ring.body.y) + playerHalfHeight <= ring.radius - 4;
+          Math.abs(this.player.y - ring.body.y) + playerHalfHeight <=
+          ring.radius + DRAGON_RING_COLLECTION_MARGIN;
         if (passedThrough) this.collectDragonRing(ring);
       }
     }
