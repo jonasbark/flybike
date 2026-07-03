@@ -76,6 +76,7 @@ const PLAYER_WIDTH = 66;
 const PLAYER_HEIGHT = 44;
 const PITCH_STEP = Phaser.Math.DegToRad(2);
 const HILL_PLAYER_X = 76;
+const DRAGON_RUN_SECONDS = 5 * 60;
 const RACER_TRACKS = {
   "meadow-circuit": [
     { x: 55, y: 143 },
@@ -288,6 +289,11 @@ export class FlyScene extends Phaser.Scene {
     if (this.levelId === "asteroids") {
       this.rawPlayerY = Phaser.Math.Wrap(this.rawPlayerY, 0, HEIGHT);
     }
+    if (this.levelId === "dragon-flight") {
+      const clampedY = Phaser.Math.Clamp(this.rawPlayerY, 8, HEIGHT - 8);
+      if (clampedY !== this.rawPlayerY) this.velocityY = 0;
+      this.rawPlayerY = clampedY;
+    }
     if (
       this.levelId === "ornithopter-run" &&
       this.levelSettings.modifierId === "upper-off" &&
@@ -406,6 +412,10 @@ export class FlyScene extends Phaser.Scene {
   }
 
   private updateDragon(difficulty: number, dt: number): void {
+    if (this.elapsed >= DRAGON_RUN_SECONDS) {
+      this.completeDragonRun();
+      return;
+    }
     const settingMultiplier = this.difficultyMultiplier();
     const speed = Phaser.Math.Linear(40, 74, difficulty) * settingMultiplier;
     const spawnEvery = Phaser.Math.Linear(2.6, 1.55, difficulty) / settingMultiplier;
@@ -420,14 +430,49 @@ export class FlyScene extends Phaser.Scene {
         const playerHalfHeight = this.trainerRun ? 7 : 9;
         const passedThrough =
           Math.abs(this.player.y - ring.body.y) + playerHalfHeight <= ring.radius - 4;
-        if (passedThrough) this.incrementScore();
-        else {
-          this.endRun();
-          return;
-        }
+        if (passedThrough) this.collectDragonRing(ring);
       }
     }
     this.removeOldDragonRings();
+  }
+
+  private collectDragonRing(ring: DragonRing): void {
+    this.incrementScore();
+    const { x, y, strokeColor } = ring.body;
+    const colors = [strokeColor, 0xffffff, 0xffd36b, 0xe46d9b];
+    for (let index = 0; index < 14; index += 1) {
+      const angle = (index / 14) * Math.PI * 2 + Phaser.Math.FloatBetween(-0.18, 0.18);
+      const distance = Phaser.Math.Between(15, 34);
+      const confetti = this.add
+        .rectangle(x, y, index % 3 === 0 ? 3 : 2, index % 2 === 0 ? 1 : 2, colors[index % 4]!)
+        .setDepth(4)
+        .setRotation(angle);
+      this.tweens.add({
+        targets: confetti,
+        x: x + Math.cos(angle) * distance,
+        y: y + Math.sin(angle) * distance + Phaser.Math.Between(-5, 8),
+        rotation: angle + Math.PI * 1.5,
+        alpha: 0,
+        duration: Phaser.Math.Between(420, 680),
+        ease: "Cubic.easeOut",
+        onComplete: () => confetti.destroy(),
+      });
+    }
+    this.tweens.add({
+      targets: ring.body,
+      rotation: Math.PI * 1.5,
+      scaleX: 1.45,
+      scaleY: 1.45,
+      alpha: 0,
+      duration: 380,
+      ease: "Back.easeIn",
+      onComplete: () => ring.body.destroy(),
+    });
+  }
+
+  private completeDragonRun(): void {
+    this.running = false;
+    emitGameEvent("run-complete", this.score);
   }
 
   private updateRacer(dt: number): void {
@@ -1425,6 +1470,7 @@ export class FlyScene extends Phaser.Scene {
       this.levelId !== "ornithopter-run" || this.levelSettings.modifierId !== "upper-off";
     if (
       this.levelId !== "asteroids" &&
+      this.levelId !== "dragon-flight" &&
       ((upperBoundaryEnabled && playerBounds.top <= 0) || playerBounds.bottom >= bottomBoundary)
     )
       return true;
@@ -1487,6 +1533,7 @@ export class FlyScene extends Phaser.Scene {
   private removeOldDragonRings(): void {
     const remaining: DragonRing[] = [];
     for (const ring of this.dragonRings) {
+      if (!ring.body.active) continue;
       if (ring.body.x < -ring.radius - 8) ring.body.destroy();
       else remaining.push(ring);
     }

@@ -110,7 +110,7 @@ export const LEVELS = [
     id: "dragon-flight",
     title: "Dragon Flight",
     description:
-      "Guide a dragon through enchanted sky rings as the course grows faster and tighter.",
+      "Collect as many enchanted sky rings as possible during a forgiving five-minute flight.",
     scoreLabel: "rings",
     maps: [
       { id: "emerald-valley", label: "Emerald Valley" },

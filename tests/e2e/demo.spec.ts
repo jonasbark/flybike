@@ -106,7 +106,7 @@ test("configures and starts Submarine Dive", async ({ page }) => {
   await expect(page.locator("#score-label")).toHaveText("hazards");
 });
 
-test("configures and starts Dragon Flight", async ({ page }) => {
+test("configures and starts Dragon Flight", async ({ page }, testInfo) => {
   await page.goto("/");
   await page.getByRole("button", { name: "Play with keys / touch" }).click();
   await page.getByRole("button", { name: "Start flight" }).click();
@@ -117,6 +117,10 @@ test("configures and starts Dragon Flight", async ({ page }) => {
   await page.getByRole("button", { name: "Start Dragon Flight" }).click();
   await expect(page.locator("#hud")).toBeVisible({ timeout: 5_000 });
   await expect(page.locator("#score-label")).toHaveText("rings");
+  if (testInfo.project.name === "chromium")
+    await expect(page.locator("#score-value")).toHaveText("1", { timeout: 15_000 });
+  else await page.waitForTimeout(12_000);
+  await expect(page.getByRole("heading", { name: "Dragon Flight over" })).not.toBeVisible();
 });
 
 test("persists the mute preference", async ({ page }) => {

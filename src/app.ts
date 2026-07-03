@@ -130,6 +130,9 @@ export class AppController {
     gameEvents.addEventListener("game-over", (event) => {
       void this.handleGameOver((event as CustomEvent<number>).detail);
     });
+    gameEvents.addEventListener("run-complete", (event) => {
+      void this.handleGameOver((event as CustomEvent<number>).detail, true);
+    });
     gameEvents.addEventListener("signal-stale", () => this.pauseForSignal());
     gameEvents.addEventListener("trajectory", (event) => {
       this.tracePosition = (event as CustomEvent<TrajectoryPoint>).detail;
@@ -964,14 +967,14 @@ export class AppController {
     this.overlay.classList.add("hidden");
   }
 
-  private async handleGameOver(score: number): Promise<void> {
+  private async handleGameOver(score: number, completed = false): Promise<void> {
     this.gameActive = false;
     this.runPanelOpen = false;
     this.pauseRideStats();
     this.restoreTerrainLoad();
     this.updateConnectionPillInteractivity();
     await this.releaseWakeLock();
-    this.audio.play("crash");
+    this.audio.play(completed ? "score" : "crash");
     const settings = this.levelSettings[this.selectedLevel];
     const fingerprint = settingsFingerprint(
       settings,
@@ -992,7 +995,7 @@ export class AppController {
     localStorage.setItem(scoreKey, String(best));
     this.overlay.classList.remove("hidden");
     this.overlay.innerHTML = `
-      <section class="panel small-panel"><p class="eyebrow">${escapeHtml(level.title)} over</p><h2>${score}</h2><p>Best ${best}</p><p class="fine-print">${escapeHtml(this.levelSettingsSummary(this.selectedLevel))}</p>
+      <section class="panel small-panel"><p class="eyebrow">${escapeHtml(level.title)} ${completed ? "complete" : "over"}</p><h2>${score}</h2><p>Best ${best}</p><p class="fine-print">${escapeHtml(this.levelSettingsSummary(this.selectedLevel))}</p>
         <div class="actions"><button id="again-button" class="primary">Fly again</button><button id="levels-button">Levels</button><button id="quit-button">Setup</button></div>
       </section>`;
     this.overlay
