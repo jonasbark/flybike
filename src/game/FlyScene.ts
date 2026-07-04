@@ -171,6 +171,7 @@ export class FlyScene extends Phaser.Scene {
   private hillGround!: Phaser.GameObjects.Graphics;
   private hillMinimap!: Phaser.GameObjects.Graphics;
   private hillAltitudeText!: Phaser.GameObjects.Text;
+  private hillGradeText!: Phaser.GameObjects.Text;
   private hillSkyBands: Phaser.GameObjects.Rectangle[] = [];
   private raceRivals: RaceRival[] = [];
   private obstacles: ObstaclePair[] = [];
@@ -541,6 +542,7 @@ export class FlyScene extends Phaser.Scene {
     }
 
     const currentGrade = hillCourseGradePercent(this.hillCourse, this.hillDistanceKm);
+    this.updateHillGradeText(currentGrade);
     const altitude = hillCourseElevation(this.hillCourse, this.hillDistanceKm);
     this.hillCameraElevation += (altitude - this.hillCameraElevation) * (1 - Math.exp(-dt / 1.1));
     const terrainAngle = this.hillTerrainAngle(this.hillDistanceKm);
@@ -570,6 +572,12 @@ export class FlyScene extends Phaser.Scene {
     const beforeY = this.hillScreenY(distanceKm - sampleKm);
     const afterY = this.hillScreenY(distanceKm + sampleKm);
     return Math.atan2(afterY - beforeY, sampleKm * HILL_WORLD_UNITS_PER_KM * 2);
+  }
+
+  private updateHillGradeText(gradePercent: number): void {
+    const direction = gradePercent > 0.05 ? "incline" : gradePercent < -0.05 ? "decline" : "flat";
+    const sign = gradePercent > 0.05 ? "+" : "";
+    this.hillGradeText.setText(`${sign}${gradePercent.toFixed(1)}% ${direction}`);
   }
 
   private completeHillCourse(): void {
@@ -910,6 +918,17 @@ export class FlyScene extends Phaser.Scene {
       .setResolution(3)
       .setDepth(6)
       .setVisible(false);
+    this.hillGradeText = this.add
+      .text(10, 56, "0.0% flat", {
+        fontFamily: "Arial, sans-serif",
+        fontSize: "8px",
+        color: "#fff8df",
+        stroke: "#101820",
+        strokeThickness: 2,
+      })
+      .setResolution(3)
+      .setDepth(6)
+      .setVisible(false);
     this.drawHillLandscape();
 
     const submarineObjects: Phaser.GameObjects.GameObject[] = [
@@ -1238,6 +1257,7 @@ export class FlyScene extends Phaser.Scene {
     this.hillPlayer.setVisible(inHills);
     this.hillMinimap.setVisible(inHills);
     this.hillAltitudeText.setVisible(inHills);
+    this.hillGradeText.setVisible(inHills);
     this.submarinePlayer.setVisible(underwater);
     this.dragonPlayer.setVisible(dragonSky);
   }
@@ -1326,6 +1346,7 @@ export class FlyScene extends Phaser.Scene {
     this.hillPlayer
       .setPosition(HILL_PLAYER_X, this.hillScreenY(0) - 11)
       .setRotation(this.hillTerrainAngle(0));
+    this.updateHillGradeText(hillCourseGradePercent(this.hillCourse, 0));
     this.drawHillLandscape();
     this.setBackdrop(levelId);
     this.velocityY = 0;
@@ -1367,6 +1388,7 @@ export class FlyScene extends Phaser.Scene {
       this.hillPlayer
         .setPosition(HILL_PLAYER_X, this.hillScreenY(0) - 11)
         .setRotation(this.hillTerrainAngle(0));
+      this.updateHillGradeText(hillCourseGradePercent(this.hillCourse, 0));
     }
     this.player.setPosition(PLAYER_X, 88).setRotation(0);
     this.ornithopterPedals.setPosition(PLAYER_X, 88).setRotation(0);
