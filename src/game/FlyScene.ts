@@ -543,7 +543,7 @@ export class FlyScene extends Phaser.Scene {
     const currentGrade = hillCourseGradePercent(this.hillCourse, this.hillDistanceKm);
     const altitude = hillCourseElevation(this.hillCourse, this.hillDistanceKm);
     this.hillCameraElevation += (altitude - this.hillCameraElevation) * (1 - Math.exp(-dt / 1.1));
-    const terrainAngle = -Math.atan(currentGrade / 100);
+    const terrainAngle = this.hillTerrainAngle(this.hillDistanceKm);
     this.hillPlayer
       .setPosition(HILL_PLAYER_X, this.hillScreenY(this.hillDistanceKm) - 11)
       .setRotation(terrainAngle);
@@ -563,6 +563,13 @@ export class FlyScene extends Phaser.Scene {
       126 -
       (hillCourseElevation(this.hillCourse, distanceKm) - this.hillCameraElevation) * pixelsPerMeter
     );
+  }
+
+  private hillTerrainAngle(distanceKm: number): number {
+    const sampleKm = 0.004;
+    const beforeY = this.hillScreenY(distanceKm - sampleKm);
+    const afterY = this.hillScreenY(distanceKm + sampleKm);
+    return Math.atan2(afterY - beforeY, sampleKm * HILL_WORLD_UNITS_PER_KM * 2);
   }
 
   private completeHillCourse(): void {
@@ -603,10 +610,10 @@ export class FlyScene extends Phaser.Scene {
       );
     this.hillGround.lineStyle(3, 0x87a94f).strokePoints(surface);
     this.hillGround.lineStyle(1, 0xd8c86e, 0.65);
-    const firstMarker = Math.floor(this.hillDistance / 64);
+    const firstMarker = Math.floor((this.hillDistance - HILL_PLAYER_X) / 64) - 1;
     for (let marker = firstMarker; marker < firstMarker + 7; marker += 1) {
       const worldX = marker * 64 + 21;
-      const x = worldX - this.hillDistance;
+      const x = HILL_PLAYER_X + worldX - this.hillDistance;
       if (x < 0 || x > WIDTH) continue;
       const y = this.hillScreenY(worldX / HILL_WORLD_UNITS_PER_KM) - 2;
       const flowerColor = marker % 3 === 0 ? 0xf4d35e : marker % 3 === 1 ? 0xf2eee2 : 0xd96c75;
@@ -617,7 +624,7 @@ export class FlyScene extends Phaser.Scene {
   }
 
   private drawHillMinimap(altitude: number): void {
-    const left = 210;
+    const left = 8;
     const top = 7;
     const width = 101;
     const height = 35;
@@ -893,7 +900,14 @@ export class FlyScene extends Phaser.Scene {
     this.hillBackdrop = this.add.container(0, 0, hillObjects).setDepth(-10);
     this.hillMinimap = this.add.graphics().setDepth(5).setVisible(false);
     this.hillAltitudeText = this.add
-      .text(212, 45, "0 m", { fontFamily: "monospace", fontSize: "7px", color: "#fff8df" })
+      .text(10, 45, "0 m", {
+        fontFamily: "Arial, sans-serif",
+        fontSize: "8px",
+        color: "#fff8df",
+        stroke: "#101820",
+        strokeThickness: 2,
+      })
+      .setResolution(3)
       .setDepth(6)
       .setVisible(false);
     this.drawHillLandscape();
@@ -1311,7 +1325,7 @@ export class FlyScene extends Phaser.Scene {
     this.hillPlayer.setAlpha(1);
     this.hillPlayer
       .setPosition(HILL_PLAYER_X, this.hillScreenY(0) - 11)
-      .setRotation(-Math.atan(hillCourseGradePercent(this.hillCourse, 0) / 100));
+      .setRotation(this.hillTerrainAngle(0));
     this.drawHillLandscape();
     this.setBackdrop(levelId);
     this.velocityY = 0;
@@ -1352,7 +1366,7 @@ export class FlyScene extends Phaser.Scene {
       this.drawHillLandscape();
       this.hillPlayer
         .setPosition(HILL_PLAYER_X, this.hillScreenY(0) - 11)
-        .setRotation(-Math.atan(hillCourseGradePercent(this.hillCourse, 0) / 100));
+        .setRotation(this.hillTerrainAngle(0));
     }
     this.player.setPosition(PLAYER_X, 88).setRotation(0);
     this.ornithopterPedals.setPosition(PLAYER_X, 88).setRotation(0);
