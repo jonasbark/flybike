@@ -133,3 +133,19 @@ test("persists the mute preference", async ({ page }) => {
   await page.reload();
   await expect(page.getByRole("button", { name: "Sound off" })).toBeVisible();
 });
+
+test("opens ride history and imports and exports JSON", async ({ page }) => {
+  await page.goto("/");
+  await page.getByRole("button", { name: "Ride history" }).click();
+  await expect(page.getByRole("heading", { name: "Ride history" })).toBeVisible();
+  await expect(page.getByText("Today", { exact: true })).toBeVisible();
+  const download = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Export JSON" }).click();
+  await download;
+  await page.locator("#history-import").setInputFiles({
+    name: "history.json",
+    mimeType: "application/json",
+    buffer: Buffer.from("[]"),
+  });
+  await expect(page.getByText("Imported 0 rides.")).toBeVisible();
+});

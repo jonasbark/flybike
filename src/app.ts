@@ -20,6 +20,18 @@ import {
   type LevelSettings,
 } from "./levels";
 import { formatRunTime, formatSessionMinutes, RideStats } from "./ride-stats";
+import {
+  groupRideHistory,
+  loadRideHistory,
+  rideTotals,
+  ridesSince,
+  saveRideHistory,
+  startOfPeriod,
+  validateRideHistory,
+  type PowerPoint,
+  type RideHistoryEntry,
+  type RideTotals,
+} from "./ride-history";
 import { DemoSource } from "./trainer/demo-source";
 import { FtmsBluetoothSource } from "./trainer/ftms-bluetooth-source";
 import { terrainLoadTarget } from "./trainer/terrain-load";
@@ -96,6 +108,9 @@ export class AppController {
   private terrainLoadFailed = false;
   private runPanelOpen = false;
   private readonly rideStats = new RideStats();
+  private rideStartedAt = 0;
+  private ridePowerCurve: PowerPoint[] = [];
+  private lastHistoryPowerAt = 0;
   private readonly audio = new GameAudio();
 
   private readonly overlay = document.querySelector<HTMLElement>("#overlay")!;
@@ -179,6 +194,7 @@ export class AppController {
         <div class="actions">
           <button id="connect-button" class="primary" ${supportsBluetooth ? "" : "disabled"}>Connect trainer</button>
           <button id="demo-button">Play with keys / touch</button>
+          <button id="history-button">Ride history</button>
         </div>
         <p class="fine-print">Bluetooth requires Chrome or Edge on desktop/Android. Close other trainer apps first.</p>
       </section>`;
@@ -188,6 +204,9 @@ export class AppController {
     this.overlay
       .querySelector("#demo-button")
       ?.addEventListener("click", () => void this.startDemo());
+    this.overlay
+      .querySelector("#history-button")
+      ?.addEventListener("click", () => this.showRideHistory());
   }
 
   private async connectTrainer(): Promise<void> {
@@ -251,6 +270,13 @@ export class AppController {
       });
     }
     if (this.gameActive && sample.powerW !== undefined) {
+      if (performance.now() - this.lastHistoryPowerAt >= 5_000) {
+        this.lastHistoryPowerAt = performance.now();
+        this.ridePowerCurve.push({
+          elapsedSeconds: Math.round((performance.now() - this.rideStartedAt) / 1000),
+          powerW: Math.max(0, sample.powerW),
+        });
+      }
       emitGameEvent("telemetry", {
         powerW: Math.max(0, sample.powerW),
         cadenceRpm: sample.cadenceRpm,
@@ -261,6 +287,9 @@ export class AppController {
 
   private beginRideStats(): void {
     this.rideStats.beginRun(performance.now());
+    this.rideStartedAt = performance.now();
+    this.lastHistoryPowerAt = 0;
+    this.ridePowerCurve = [];
     this.rideStatsPanel.classList.remove("hidden");
     this.renderRideStats();
   }
@@ -296,6 +325,103 @@ export class AppController {
     this.sessionTime.textContent = formatSessionMinutes(stats.sessionElapsedMs);
     this.runDistance.textContent = stats.runDistanceKm.toFixed(2);
     this.sessionDistance.textContent = stats.sessionDistanceKm.toFixed(2);
+  }
+
+  private saveCurrentRide(score: number, completed: boolean): void {
+    if (!this.rideStartedAt) return;
+    const snapshot = this.rideStats.getSnapshot();
+    if (snapshot.runElapsedMs < 1_000 && snapshot.runDistanceKm <= 0) return;
+    const now = new Date();
+    const entry: RideHistoryEntry = {
+      id: `${now.toISOString()}-${Math.random().toString(36).slice(2, 8)}`,
+      startedAt: new Date(Date.now() - (performance.now() - this.rideStartedAt)).toISOString(),
+      endedAt: now.toISOString(),
+      durationMs: snapshot.runElapsedMs,
+      distanceKm: snapshot.runDistanceKm,
+      levelId: this.selectedLevel,
+      settings: { ...this.levelSettings[this.selectedLevel] },
+      score,
+      completed,
+      powerCurve: [...this.ridePowerCurve],
+    };
+    saveRideHistory([entry, ...loadRideHistory()]);
+    this.rideStartedAt = 0;
+  }
+
+  private totalsMarkup(label: string, totals: RideTotals): string {
+    return `<div class="history-total"><strong>${escapeHtml(label)}</strong><span>${totals.rides} rides · ${(totals.durationMs / 3_600_000).toFixed(1)} h · ${totals.distanceKm.toFixed(1)} km · ${totals.averagePowerW} W avg · ${totals.maximumPowerW} W max</span></div>`;
+  }
+
+  private powerCurveMarkup(entry: RideHistoryEntry): string {
+    if (entry.powerCurve.length < 2) return '<span class="fine-print">No power curve</span>';
+    const maximum = Math.max(1, ...entry.powerCurve.map(({ powerW }) => powerW));
+    const lastTime = Math.max(1, entry.powerCurve.at(-1)!.elapsedSeconds);
+    const points = entry.powerCurve
+      .map(
+        ({ elapsedSeconds, powerW }) =>
+          `${(elapsedSeconds / lastTime) * 180},${40 - (powerW / maximum) * 36}`,
+      )
+      .join(" ");
+    return `<svg class="power-curve" viewBox="0 0 180 42" role="img" aria-label="Power curve"><polyline points="${points}"/></svg>`;
+  }
+
+  private showRideHistory(message?: string): void {
+    const entries = loadRideHistory();
+    const now = new Date();
+    const current = (["day", "week", "month", "year"] as const).map((period) =>
+      this.totalsMarkup(
+        period === "day" ? "Today" : `This ${period}`,
+        rideTotals(ridesSince(entries, startOfPeriod(period, now))),
+      ),
+    );
+    const archives = (["day", "month", "year"] as const)
+      .flatMap((unit) =>
+        groupRideHistory(
+          entries.filter((entry) => new Date(entry.startedAt) < startOfPeriod(unit, now)),
+          unit,
+        ).slice(0, unit === "day" ? 14 : 12),
+      )
+      .map(({ key, totals }) => this.totalsMarkup(key, totals))
+      .join("");
+    const recent = entries
+      .slice(0, 20)
+      .map(
+        (entry) =>
+          `<article class="history-ride"><div><strong>${escapeHtml(getLevel(entry.levelId).title)}</strong><span>${new Date(entry.startedAt).toLocaleString()} · ${(entry.durationMs / 60_000).toFixed(0)} min · ${entry.distanceKm.toFixed(2)} km · score ${entry.score}</span><small>${escapeHtml(JSON.stringify(entry.settings))}</small></div>${this.powerCurveMarkup(entry)}</article>`,
+      )
+      .join("");
+    this.overlay.classList.remove("hidden", "compact");
+    this.overlay.innerHTML = `<section class="panel history-panel" aria-labelledby="history-title"><p class="eyebrow">Local progress</p><h2 id="history-title">Ride history</h2>${message ? `<p class="notice">${escapeHtml(message)}</p>` : ""}<div class="history-current">${current.join("")}</div><h3>Previous periods</h3><div class="history-archive">${archives || '<p class="fine-print">No previous periods yet.</p>'}</div><h3>Recent rides</h3><div class="history-rides">${recent || '<p class="fine-print">Complete a ride to start tracking progress.</p>'}</div><input id="history-import" type="file" accept="application/json" hidden><div class="actions"><button id="history-export">Export JSON</button><button id="history-import-button">Import JSON</button><button id="history-back" class="primary">Back</button></div><p class="fine-print">History stays in this browser unless exported.</p></section>`;
+    this.overlay.querySelector("#history-back")?.addEventListener("click", () => this.showHome());
+    this.overlay.querySelector("#history-export")?.addEventListener("click", () => {
+      const url = URL.createObjectURL(
+        new Blob([JSON.stringify(entries, null, 2)], { type: "application/json" }),
+      );
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `flybike-history-${new Date().toISOString().slice(0, 10)}.json`;
+      link.click();
+      URL.revokeObjectURL(url);
+    });
+    const input = this.overlay.querySelector<HTMLInputElement>("#history-import")!;
+    this.overlay
+      .querySelector("#history-import-button")
+      ?.addEventListener("click", () => input.click());
+    input.addEventListener("change", () => void this.importRideHistory(input));
+  }
+
+  private async importRideHistory(input: HTMLInputElement): Promise<void> {
+    try {
+      const file = input.files?.[0];
+      if (!file) return;
+      const imported = validateRideHistory(JSON.parse(await file.text()));
+      const merged = new Map(loadRideHistory().map((entry) => [entry.id, entry]));
+      imported.forEach((entry) => merged.set(entry.id, entry));
+      saveRideHistory([...merged.values()].sort((a, b) => b.startedAt.localeCompare(a.startedAt)));
+      this.showRideHistory(`Imported ${imported.length} rides.`);
+    } catch (error) {
+      this.showRideHistory(error instanceof Error ? error.message : "Could not import history.");
+    }
   }
 
   private handleStatus(status: ConnectionStatus): void {
@@ -639,10 +765,12 @@ export class AppController {
   }
 
   private leaveRunForLevels(): void {
+    const wasTrace = this.traceActive;
     this.gameActive = false;
     this.traceActive = false;
     this.runPanelOpen = false;
     this.pauseRideStats();
+    if (!wasTrace) this.saveCurrentRide(Number(this.scoreValue.textContent ?? 0), false);
     this.rideStatsPanel.classList.add("hidden");
     this.restoreTerrainLoad();
     emitGameEvent("stop-run", undefined);
@@ -1009,6 +1137,7 @@ export class AppController {
     this.gameActive = false;
     this.runPanelOpen = false;
     this.pauseRideStats();
+    this.saveCurrentRide(score, completed);
     this.restoreTerrainLoad();
     this.updateConnectionPillInteractivity();
     await this.releaseWakeLock();
@@ -1046,10 +1175,12 @@ export class AppController {
   }
 
   private quitRun(): void {
+    const wasTrace = this.traceActive;
     this.gameActive = false;
     this.traceActive = false;
     this.runPanelOpen = false;
     this.pauseRideStats();
+    if (!wasTrace) this.saveCurrentRide(Number(this.scoreValue.textContent ?? 0), false);
     this.rideStatsPanel.classList.add("hidden");
     this.restoreTerrainLoad();
     this.updateConnectionPillInteractivity();

@@ -32,6 +32,10 @@ Trainer gameplay maps sustained effort to a requested altitude: cruise returns t
 
 The lower-left ride display shows active run time as minutes and seconds, with accumulated session minutes in parentheses. Distance is integrated from trainer-reported speed and shown in kilometers for the current run and controller session. Countdown, menu, and paused time are excluded; choosing a new controller starts a new session.
 
+### Ride history
+
+The home-screen **Ride history** view stores completed and manually ended runs locally. It includes distance, active time, level settings, score, five-second power curves, and summaries for today, this week, this month, this year, and previous calendar periods. History can be exported as JSON and imported on another browser; importing merges rides by ID. No history leaves the browser unless explicitly exported.
+
 ### Levels
 
 - **Ornithopter Run** is the original endless gate course, now backed by independently scrolling clouds, distant mountains, midground hills, and foreground villages.
@@ -102,7 +106,12 @@ New protocols should implement `TrainerSource` and emit the same normalized `Tel
 
 ## GitHub Pages
 
-The Pages workflow tests and builds every push to `main`, then deploys `dist/` with the `/flybike/` base path. Enable **GitHub Actions** as the Pages source in the repository settings before the first deployment.
+The Pages workflow publishes two builds in one atomic deployment:
+
+- `https://seanrjohnson.github.io/flybike/` builds the protected `stable` branch.
+- `https://seanrjohnson.github.io/flybike/dev/` builds the triggering `main` revision.
+
+Every push to `main` tests the project and refreshes the development build while rebuilding the unchanged stable branch at the root. To promote a release, update `stable` to the approved `main` commit, push it, then manually run **Test and deploy GitHub Pages** from the Actions tab. Keep **GitHub Actions** selected as the Pages source in repository settings.
 
 ## Art and license
 

@@ -17,7 +17,7 @@ This file records promising directions for FlyBike beyond the current levels.
 - Short per-level tutorials and live control previews.
 - Adaptive difficulty based on recent completed runs.
 - Achievements, daily challenges, and richer session summaries.
-- Ride-history export with power curves, distance, settings, and scores.
+- Ride history with power curves, distance, settings, scores, progress periods, and JSON import/export — implemented.
 - Ghost replays driven by a previous run's power trace.
 - Multiple local rider profiles for shared trainers.
 - Additional music, sound themes, and power-zone feedback.
