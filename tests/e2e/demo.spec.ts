@@ -87,6 +87,9 @@ test("configures and starts Hill Climber", async ({ page }) => {
   await page.getByRole("button", { name: "Start flight" }).click();
   await page.getByRole("button", { name: /Hill Climber/ }).click();
   await expect(page.getByRole("heading", { name: "Customize level" })).toBeVisible();
+  await page.getByLabel("Course length").selectOption("25");
+  await page.getByLabel("Maximum elevation").selectOption("2000");
+  await page.getByLabel("Slope character").selectOption("mixed");
   await expect(page.getByLabel("Physical terrain resistance")).toBeDisabled();
   await page.getByRole("button", { name: "Start Hill Climber" }).click();
   await expect(page.locator("#hud")).toBeVisible({ timeout: 5_000 });

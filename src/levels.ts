@@ -16,7 +16,19 @@ export type LevelSettings = {
   difficulty: DifficultyId;
   optionId?: string;
   modifierId?: string;
+  courseLengthKm?: number;
+  maxElevationM?: number;
+  steepnessStyle?: "gentle" | "moderate" | "steep" | "mixed";
 };
+
+export const HILL_COURSE_LENGTHS = [2.5, 5, 10, 15, 25, 50, 75, 100] as const;
+export const HILL_MAX_ELEVATIONS = [500, 1000, 2000, 4000] as const;
+export const HILL_STEEPNESS_STYLES = [
+  { id: "gentle", label: "Gentle climbs and descents" },
+  { id: "moderate", label: "Moderate climbs and descents" },
+  { id: "steep", label: "Steep climbs and descents" },
+  { id: "mixed", label: "Mixed terrain" },
+] as const;
 
 export const LEVELS = [
   {
@@ -80,7 +92,7 @@ export const LEVELS = [
     id: "hill-climber",
     title: "Hill Climber",
     description:
-      "Ride an endless side-scrolling landscape where every slope changes the power needed for speed.",
+      "Ride a generated mountain course where altitude, scenery, and resistance follow every slope.",
     scoreLabel: "km",
     maps: [
       { id: "rolling-meadows", label: "Rolling Meadows" },
@@ -134,12 +146,18 @@ export function getLevel(levelId: LevelId) {
 
 export function defaultLevelSettings(levelId: LevelId): LevelSettings {
   const level = getLevel(levelId);
-  return {
+  const settings: LevelSettings = {
     mapId: level.maps[0].id,
     difficulty: "standard",
     optionId: "options" in level ? level.options[0].id : undefined,
     modifierId: "modifiers" in level ? level.modifiers[0].id : undefined,
   };
+  if (levelId === "hill-climber") {
+    settings.courseLengthKm = 5;
+    settings.maxElevationM = 1000;
+    settings.steepnessStyle = "mixed";
+  }
+  return settings;
 }
 
 export function settingsFingerprint(settings: LevelSettings, terrainEffectScale?: number): string {
@@ -149,6 +167,9 @@ export function settingsFingerprint(settings: LevelSettings, terrainEffectScale?
     settings.optionId ?? "default",
     settings.modifierId ?? "default",
   ];
+  if (settings.courseLengthKm !== undefined) parts.push(`length-${settings.courseLengthKm}`);
+  if (settings.maxElevationM !== undefined) parts.push(`elevation-${settings.maxElevationM}`);
+  if (settings.steepnessStyle !== undefined) parts.push(`slopes-${settings.steepnessStyle}`);
   if (terrainEffectScale !== undefined) parts.push(`terrain-${terrainEffectScale}`);
   return parts.join(".").replaceAll(/[^a-z0-9.-]/gi, "-");
 }

@@ -11,6 +11,9 @@ import {
   defaultLevelSettings,
   DIFFICULTIES,
   getLevel,
+  HILL_COURSE_LENGTHS,
+  HILL_MAX_ELEVATIONS,
+  HILL_STEEPNESS_STYLES,
   LEVELS,
   settingsFingerprint,
   type LevelId,
@@ -274,6 +277,15 @@ export class AppController {
   }
 
   private tickRideStats(): void {
+    const hillStopped =
+      this.gameActive &&
+      this.selectedLevel === "hill-climber" &&
+      (this.latestSample.speedKph ?? 0) < 0.5 &&
+      (this.latestSample.cadenceRpm ?? 0) < 1 &&
+      (this.latestSample.powerW ?? 0) < 5;
+    if (hillStopped) this.rideStats.pause(performance.now(), 0);
+    else if (this.gameActive && !this.runPanelOpen && !this.countdownActive)
+      this.rideStats.resume(performance.now());
     this.rideStats.tick(performance.now(), this.latestSample.speedKph ?? 0);
     this.renderRideStats();
   }
@@ -468,14 +480,7 @@ export class AppController {
         <h2 id="level-setup-title">Customize level</h2>
         <p>${escapeHtml(level.description)}</p>
         <div class="level-settings">
-          <label for="level-map">Map</label>
-          <select id="level-map">
-            ${this.choiceOptions(level.maps, settings.mapId)}
-          </select>
-          <label for="level-difficulty">Difficulty</label>
-          <select id="level-difficulty">
-            ${this.choiceOptions(DIFFICULTIES, settings.difficulty)}
-          </select>
+          ${isHillClimber ? `<label for="hill-length">Course length</label><select id="hill-length">${HILL_COURSE_LENGTHS.map((value) => `<option value="${value}" ${value === settings.courseLengthKm ? "selected" : ""}>${value} km</option>`).join("")}</select><label for="hill-elevation">Maximum elevation</label><select id="hill-elevation">${HILL_MAX_ELEVATIONS.map((value) => `<option value="${value}" ${value === settings.maxElevationM ? "selected" : ""}>${value.toLocaleString()} m</option>`).join("")}</select><label for="hill-steepness">Slope character</label><select id="hill-steepness">${this.choiceOptions(HILL_STEEPNESS_STYLES, settings.steepnessStyle)}</select>` : `<label for="level-map">Map</label><select id="level-map">${this.choiceOptions(level.maps, settings.mapId)}</select><label for="level-difficulty">Difficulty</label><select id="level-difficulty">${this.choiceOptions(DIFFICULTIES, settings.difficulty)}</select>`}
           ${hasOptions ? `<label for="level-option">${escapeHtml(level.optionLabel)}</label><select id="level-option">${this.choiceOptions(level.options, settings.optionId)}</select>` : ""}
           ${hasModifiers ? `<label for="level-modifier">${escapeHtml(level.modifierLabel)}</label><select id="level-modifier">${this.choiceOptions(level.modifiers, settings.modifierId)}</select>` : ""}
         </div>
@@ -498,11 +503,23 @@ export class AppController {
       </section>`;
     const previewCurrentSettings = () => {
       this.previewLevel({
-        mapId: this.overlay.querySelector<HTMLSelectElement>("#level-map")!.value,
-        difficulty: this.overlay.querySelector<HTMLSelectElement>("#level-difficulty")!.value as
-          "relaxed" | "standard" | "expert",
+        mapId: isHillClimber
+          ? "rolling-meadows"
+          : this.overlay.querySelector<HTMLSelectElement>("#level-map")!.value,
+        difficulty: isHillClimber
+          ? "standard"
+          : (this.overlay.querySelector<HTMLSelectElement>("#level-difficulty")!.value as
+              "relaxed" | "standard" | "expert"),
         optionId: this.overlay.querySelector<HTMLSelectElement>("#level-option")?.value,
         modifierId: this.overlay.querySelector<HTMLSelectElement>("#level-modifier")?.value,
+        courseLengthKm: Number(
+          this.overlay.querySelector<HTMLSelectElement>("#hill-length")?.value ?? 5,
+        ),
+        maxElevationM: Number(
+          this.overlay.querySelector<HTMLSelectElement>("#hill-elevation")?.value ?? 1000,
+        ),
+        steepnessStyle: (this.overlay.querySelector<HTMLSelectElement>("#hill-steepness")?.value ??
+          "mixed") as LevelSettings["steepnessStyle"],
       });
     };
     for (const select of this.overlay.querySelectorAll<HTMLSelectElement>(
@@ -511,13 +528,26 @@ export class AppController {
       select.addEventListener("change", previewCurrentSettings);
     }
     this.overlay.querySelector("#start-level")?.addEventListener("click", () => {
-      const difficulty = this.overlay.querySelector<HTMLSelectElement>("#level-difficulty");
-      this.levelSettings[this.selectedLevel] = {
-        mapId: this.overlay.querySelector<HTMLSelectElement>("#level-map")!.value,
-        difficulty: difficulty!.value as LevelSettings["difficulty"],
-        optionId: this.overlay.querySelector<HTMLSelectElement>("#level-option")?.value,
-        modifierId: this.overlay.querySelector<HTMLSelectElement>("#level-modifier")?.value,
-      };
+      this.levelSettings[this.selectedLevel] = isHillClimber
+        ? {
+            mapId: "rolling-meadows",
+            difficulty: "standard",
+            courseLengthKm: Number(
+              this.overlay.querySelector<HTMLSelectElement>("#hill-length")!.value,
+            ),
+            maxElevationM: Number(
+              this.overlay.querySelector<HTMLSelectElement>("#hill-elevation")!.value,
+            ),
+            steepnessStyle: this.overlay.querySelector<HTMLSelectElement>("#hill-steepness")!
+              .value as LevelSettings["steepnessStyle"],
+          }
+        : {
+            mapId: this.overlay.querySelector<HTMLSelectElement>("#level-map")!.value,
+            difficulty: this.overlay.querySelector<HTMLSelectElement>("#level-difficulty")!
+              .value as LevelSettings["difficulty"],
+            optionId: this.overlay.querySelector<HTMLSelectElement>("#level-option")?.value,
+            modifierId: this.overlay.querySelector<HTMLSelectElement>("#level-modifier")?.value,
+          };
       if (isHillClimber) {
         const terrain = this.overlay.querySelector<HTMLSelectElement>("#terrain-resistance");
         this.terrainResistanceScale = supportsTerrainLoad ? Number(terrain?.value ?? 0) : 0;
@@ -569,7 +599,15 @@ export class AppController {
           "Default",
       );
     }
-    if (levelId === "hill-climber") labels.push(`Terrain effect ${this.terrainResistanceScale}×`);
+    if (levelId === "hill-climber")
+      labels.splice(
+        0,
+        labels.length,
+        `${settings.courseLengthKm} km`,
+        `${settings.maxElevationM} m`,
+        settings.steepnessStyle ?? "mixed",
+        `Terrain effect ${this.terrainResistanceScale}×`,
+      );
     return labels.join(" · ");
   }
 

@@ -14,6 +14,9 @@ describe("level settings", () => {
       difficulty: "standard",
       optionId: undefined,
       modifierId: undefined,
+      courseLengthKm: 5,
+      maxElevationM: 1000,
+      steepnessStyle: "mixed",
     });
   });
 
@@ -23,5 +26,13 @@ describe("level settings", () => {
     expect(settingsFingerprint({ ...base, optionId: "large" })).toBe(
       "highlands.expert.large.default",
     );
+    expect(
+      settingsFingerprint({
+        ...base,
+        courseLengthKm: 25,
+        maxElevationM: 2000,
+        steepnessStyle: "steep",
+      }),
+    ).toContain("length-25.elevation-2000.slopes-steep");
   });
 });

@@ -4,10 +4,12 @@ import { EffortMapper, TRAINER_VELOCITY_RESPONSE_MS, trainerAltitudeVelocity } f
 import type { LevelId, LevelSettings } from "../levels";
 import { emitGameEvent, gameEvents } from "./events";
 import {
-  hillGradePercent,
+  generateHillCourse,
+  hillCourseElevation,
+  hillCourseGradePercent,
+  hillElevationZone,
   hillTargetSpeed,
-  hillTerrainDerivative,
-  hillTerrainY,
+  type HillCourse,
 } from "./hill-physics";
 
 type ObstaclePair = {
@@ -76,6 +78,7 @@ const PLAYER_WIDTH = 66;
 const PLAYER_HEIGHT = 44;
 const PITCH_STEP = Phaser.Math.DegToRad(2);
 const HILL_PLAYER_X = 76;
+const HILL_WORLD_UNITS_PER_KM = 500;
 const DRAGON_RUN_SECONDS = 5 * 60;
 const DRAGON_RING_COLLECTION_MARGIN = 6;
 const RACER_TRACKS = {
@@ -165,6 +168,9 @@ export class FlyScene extends Phaser.Scene {
   private hillFarTerrain!: Phaser.GameObjects.Graphics;
   private hillMidTerrain!: Phaser.GameObjects.Graphics;
   private hillGround!: Phaser.GameObjects.Graphics;
+  private hillMinimap!: Phaser.GameObjects.Graphics;
+  private hillAltitudeText!: Phaser.GameObjects.Text;
+  private hillSkyBands: Phaser.GameObjects.Rectangle[] = [];
   private raceRivals: RaceRival[] = [];
   private obstacles: ObstaclePair[] = [];
   private asteroids: AsteroidObstacle[] = [];
@@ -199,8 +205,10 @@ export class FlyScene extends Phaser.Scene {
   private racerLane = 0;
   private racerHardPowerW = 260;
   private hillDistance = 0;
+  private hillDistanceKm = 0;
   private hillSpeed = 0;
-  private hillStallElapsed = 0;
+  private hillCameraElevation = 0;
+  private hillCourse: HillCourse = generateHillCourse(5, 1000, "mixed", 1);
   private hillHardPowerW = 260;
   private lastTerrainGradeAt = 0;
 
@@ -505,8 +513,7 @@ export class FlyScene extends Phaser.Scene {
   }
 
   private updateHillClimber(dt: number): void {
-    const worldX = this.hillDistance + HILL_PLAYER_X;
-    const gradePercent = hillGradePercent(worldX, this.levelSettings.mapId);
+    const gradePercent = hillCourseGradePercent(this.hillCourse, this.hillDistanceKm);
     const targetSpeed = hillTargetSpeed(
       this.mapper!.getSmoothedPower(),
       this.hillHardPowerW,
@@ -514,19 +521,24 @@ export class FlyScene extends Phaser.Scene {
     );
     const responseSeconds = this.trainerRun ? 0.85 : 0.4;
     this.hillSpeed += (targetSpeed - this.hillSpeed) * (1 - Math.exp(-dt / responseSeconds));
-    this.hillDistance += this.hillSpeed * dt;
+    this.hillDistanceKm = Math.min(
+      this.hillCourse.lengthKm,
+      this.hillDistanceKm + (this.hillSpeed * dt) / 3600,
+    );
+    this.hillDistance = this.hillDistanceKm * HILL_WORLD_UNITS_PER_KM;
 
-    const currentScore = Math.floor(this.hillDistance / 500);
+    const currentScore = Math.floor(this.hillDistanceKm);
     if (currentScore > this.score) {
       this.score = currentScore;
       emitGameEvent("score", this.score);
     }
 
-    const currentWorldX = this.hillDistance + HILL_PLAYER_X;
-    const currentGrade = hillGradePercent(currentWorldX, this.levelSettings.mapId);
-    const terrainAngle = Math.atan(hillTerrainDerivative(currentWorldX, this.levelSettings.mapId));
+    const currentGrade = hillCourseGradePercent(this.hillCourse, this.hillDistanceKm);
+    const altitude = hillCourseElevation(this.hillCourse, this.hillDistanceKm);
+    this.hillCameraElevation += (altitude - this.hillCameraElevation) * (1 - Math.exp(-dt / 1.1));
+    const terrainAngle = -Math.atan(currentGrade / 100);
     this.hillPlayer
-      .setPosition(HILL_PLAYER_X, hillTerrainY(currentWorldX, this.levelSettings.mapId) - 11)
+      .setPosition(HILL_PLAYER_X, this.hillScreenY(this.hillDistanceKm) - 11)
       .setRotation(terrainAngle);
     this.drawHillLandscape();
 
@@ -535,24 +547,49 @@ export class FlyScene extends Phaser.Scene {
       emitGameEvent("terrain-grade", { gradePercent: currentGrade });
     }
 
-    if (this.elapsed > 3 && this.hillSpeed < 2.5) this.hillStallElapsed += dt;
-    else this.hillStallElapsed = 0;
-    if (this.hillStallElapsed >= 4) this.endRun();
+    if (this.hillDistanceKm >= this.hillCourse.lengthKm) this.completeHillCourse();
+  }
+
+  private hillScreenY(distanceKm: number): number {
+    const pixelsPerMeter = Math.min(0.4, 320 / this.hillCourse.maxElevationM);
+    return (
+      126 -
+      (hillCourseElevation(this.hillCourse, distanceKm) - this.hillCameraElevation) * pixelsPerMeter
+    );
+  }
+
+  private completeHillCourse(): void {
+    this.running = false;
+    emitGameEvent("run-complete", this.score);
   }
 
   private drawHillLandscape(): void {
-    this.drawDistantHillLayer(this.hillFarTerrain, this.hillDistance * 0.14, 112, 17, 0x789b72);
-    this.drawDistantHillLayer(this.hillMidTerrain, this.hillDistance * 0.34, 132, 22, 0x557b56);
+    const altitude = hillCourseElevation(this.hillCourse, this.hillDistanceKm);
+    const zone = hillElevationZone(altitude, this.hillCourse.maxElevationM);
+    const palettes = [
+      [0x83c7d8, 0xaed7ce, 0xe5d59f, 0x789b72, 0x557b56, 0x47733e],
+      [0x75b8d0, 0x9cc7b1, 0xc5c77f, 0x668d62, 0x477147, 0x3f683b],
+      [0x679dbb, 0x91b2ae, 0xa8aa82, 0x527461, 0x3f594d, 0x3e5840],
+      [0x7890a3, 0xa7afb0, 0xb1aa96, 0x737978, 0x565e62, 0x55544d],
+      [0xa9c9da, 0xd7e4e8, 0xe9edf0, 0x9caeb6, 0x74858e, 0xb8cbd0],
+    ] as const;
+    const palette = palettes[zone]!;
+    this.hillSkyBands.forEach((band, index) => band.setFillStyle(palette[index]!));
+    this.drawDistantHillLayer(this.hillFarTerrain, this.hillDistance * 0.14, 112, 17, palette[3]!);
+    this.drawDistantHillLayer(this.hillMidTerrain, this.hillDistance * 0.34, 132, 22, palette[4]!);
 
     const surface: Phaser.Math.Vector2[] = [];
     for (let x = 0; x <= WIDTH; x += 4) {
       surface.push(
-        new Phaser.Math.Vector2(x, hillTerrainY(this.hillDistance + x, this.levelSettings.mapId)),
+        new Phaser.Math.Vector2(
+          x,
+          this.hillScreenY(this.hillDistanceKm + (x - HILL_PLAYER_X) / HILL_WORLD_UNITS_PER_KM),
+        ),
       );
     }
     this.hillGround.clear();
     this.hillGround
-      .fillStyle(0x47733e)
+      .fillStyle(palette[5]!)
       .fillPoints(
         [new Phaser.Math.Vector2(0, HEIGHT), ...surface, new Phaser.Math.Vector2(WIDTH, HEIGHT)],
         true,
@@ -564,11 +601,40 @@ export class FlyScene extends Phaser.Scene {
       const worldX = marker * 64 + 21;
       const x = worldX - this.hillDistance;
       if (x < 0 || x > WIDTH) continue;
-      const y = hillTerrainY(worldX, this.levelSettings.mapId) - 2;
+      const y = this.hillScreenY(worldX / HILL_WORLD_UNITS_PER_KM) - 2;
       const flowerColor = marker % 3 === 0 ? 0xf4d35e : marker % 3 === 1 ? 0xf2eee2 : 0xd96c75;
       this.hillGround.lineBetween(x, y, x, y - 5);
       this.hillGround.fillStyle(flowerColor).fillCircle(x, y - 6, 1.5);
     }
+    this.drawHillMinimap(altitude);
+  }
+
+  private drawHillMinimap(altitude: number): void {
+    const left = 210;
+    const top = 7;
+    const width = 101;
+    const height = 35;
+    const points = this.hillCourse.elevations.map(
+      (elevation, index) =>
+        new Phaser.Math.Vector2(
+          left + (index / (this.hillCourse.elevations.length - 1)) * width,
+          top + height - (elevation / this.hillCourse.maxElevationM) * (height - 4) - 2,
+        ),
+    );
+    const progress = this.hillDistanceKm / this.hillCourse.lengthKm;
+    this.hillMinimap
+      .clear()
+      .fillStyle(0x101820, 0.7)
+      .fillRoundedRect(left - 3, top - 3, width + 6, height + 6, 3)
+      .lineStyle(1, 0xe8e0c2, 0.7)
+      .strokePoints(points)
+      .fillStyle(0xffd36b)
+      .fillCircle(
+        left + progress * width,
+        top + height - (altitude / this.hillCourse.maxElevationM) * (height - 4) - 2,
+        2,
+      );
+    this.hillAltitudeText.setText(`${Math.round(altitude)} m`);
   }
 
   private drawDistantHillLayer(
@@ -801,10 +867,13 @@ export class FlyScene extends Phaser.Scene {
     this.hillFarTerrain = this.add.graphics();
     this.hillMidTerrain = this.add.graphics();
     this.hillGround = this.add.graphics();
-    const hillObjects: Phaser.GameObjects.GameObject[] = [
+    this.hillSkyBands = [
       this.add.rectangle(160, 30, 320, 60, 0x83c7d8),
       this.add.rectangle(160, 90, 320, 60, 0xaed7ce),
       this.add.rectangle(160, 150, 320, 60, 0xe5d59f),
+    ];
+    const hillObjects: Phaser.GameObjects.GameObject[] = [
+      ...this.hillSkyBands,
       this.add.circle(264, 28, 17, 0xffd477, 0.9),
       this.add.ellipse(53, 27, 44, 8, 0xf7f0d8, 0.7),
       this.add.ellipse(185, 42, 54, 10, 0xf7f0d8, 0.55),
@@ -815,6 +884,11 @@ export class FlyScene extends Phaser.Scene {
     this.hillMapOverlay = this.add.rectangle(160, 90, WIDTH, HEIGHT, 0xffffff, 0);
     hillObjects.push(this.hillMapOverlay);
     this.hillBackdrop = this.add.container(0, 0, hillObjects).setDepth(-10);
+    this.hillMinimap = this.add.graphics().setDepth(5).setVisible(false);
+    this.hillAltitudeText = this.add
+      .text(212, 45, "0 m", { fontFamily: "monospace", fontSize: "7px", color: "#fff8df" })
+      .setDepth(6)
+      .setVisible(false);
     this.drawHillLandscape();
 
     const submarineObjects: Phaser.GameObjects.GameObject[] = [
@@ -1141,6 +1215,8 @@ export class FlyScene extends Phaser.Scene {
       rival.body.setVisible(onTrack && index < this.activeRivalCount());
     }
     this.hillPlayer.setVisible(inHills);
+    this.hillMinimap.setVisible(inHills);
+    this.hillAltitudeText.setVisible(inHills);
     this.submarinePlayer.setVisible(underwater);
     this.dragonPlayer.setVisible(dragonSky);
   }
@@ -1214,15 +1290,21 @@ export class FlyScene extends Phaser.Scene {
       this.positionRaceCar(rival.body, rival.progress, rival.lane);
     }
     this.hillDistance = 0;
+    this.hillDistanceKm = 0;
     this.hillSpeed = 0;
-    this.hillStallElapsed = 0;
     this.hillHardPowerW = profile.hardPowerW;
     this.lastTerrainGradeAt = 0;
+    this.hillCourse = generateHillCourse(
+      settings.courseLengthKm ?? 5,
+      settings.maxElevationM ?? 1000,
+      settings.steepnessStyle ?? "mixed",
+      Date.now() ^ Phaser.Math.Between(0, 0x7fffffff),
+    );
+    this.hillCameraElevation = hillCourseElevation(this.hillCourse, 0);
     this.hillPlayer.setAlpha(1);
-    const hillWorldX = this.hillDistance + HILL_PLAYER_X;
     this.hillPlayer
-      .setPosition(HILL_PLAYER_X, hillTerrainY(hillWorldX, this.levelSettings.mapId) - 11)
-      .setRotation(Math.atan(hillTerrainDerivative(hillWorldX, this.levelSettings.mapId)));
+      .setPosition(HILL_PLAYER_X, this.hillScreenY(0) - 11)
+      .setRotation(-Math.atan(hillCourseGradePercent(this.hillCourse, 0) / 100));
     this.drawHillLandscape();
     this.setBackdrop(levelId);
     this.velocityY = 0;
@@ -1252,11 +1334,18 @@ export class FlyScene extends Phaser.Scene {
       this.positionRaceCar(this.racerPlayer, 0, 0);
     } else if (levelId === "hill-climber") {
       this.hillDistance = 0;
+      this.hillDistanceKm = 0;
+      this.hillCourse = generateHillCourse(
+        settings.courseLengthKm ?? 5,
+        settings.maxElevationM ?? 1000,
+        settings.steepnessStyle ?? "mixed",
+        1,
+      );
+      this.hillCameraElevation = hillCourseElevation(this.hillCourse, 0);
       this.drawHillLandscape();
-      const worldX = HILL_PLAYER_X;
       this.hillPlayer
-        .setPosition(HILL_PLAYER_X, hillTerrainY(worldX, settings.mapId) - 11)
-        .setRotation(Math.atan(hillTerrainDerivative(worldX, settings.mapId)));
+        .setPosition(HILL_PLAYER_X, this.hillScreenY(0) - 11)
+        .setRotation(-Math.atan(hillCourseGradePercent(this.hillCourse, 0) / 100));
     }
     this.player.setPosition(PLAYER_X, 88).setRotation(0);
     this.ornithopterPedals.setPosition(PLAYER_X, 88).setRotation(0);
