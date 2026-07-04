@@ -113,6 +113,23 @@ The Pages workflow publishes two builds in one atomic deployment:
 
 Every push to `main` tests the project and refreshes the development build while rebuilding the unchanged stable branch at the root. To promote a release, update `stable` to the approved `main` commit, push it, then manually run **Test and deploy GitHub Pages** from the Actions tab. Keep **GitHub Actions** selected as the Pages source in repository settings.
 
+### Deployment workflow
+
+Normal development is committed and pushed to `main`:
+
+```sh
+git push origin main
+```
+
+After the Pages workflow succeeds, verify the development build at `https://seanrjohnson.github.io/flybike/dev/`. When that revision is ready for stable release, advance the `stable` branch to the approved commit:
+
+```sh
+git fetch origin
+git push origin main:stable
+```
+
+Then open **Actions → Test and deploy GitHub Pages → Run workflow** and run it from `main`. Verify the stable build at `https://seanrjohnson.github.io/flybike/`. If releasing an older tested commit rather than current `main`, update `stable` through a reviewed branch or pull request instead of force-pushing it. Protect `stable` in repository branch settings so routine development cannot update it accidentally.
+
 ## Art and license
 
 The ornithopter sprite is an original project asset generated for FlyBike using OpenAI's built-in image generation tool, then chroma-keyed locally for transparency. The final prompt requested a single side-view 16-bit pixel-art pedal-powered Leonardo-style ornithopter on a flat green background, using an umber, brass, parchment, burgundy, and blue-gray palette with no text or logos.

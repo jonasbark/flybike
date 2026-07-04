@@ -24,6 +24,7 @@ type AsteroidObstacle = {
   body: Phaser.GameObjects.Image;
   radius: number;
   spin: number;
+  velocityY: number;
   scored: boolean;
 };
 
@@ -392,6 +393,12 @@ export class FlyScene extends Phaser.Scene {
 
     for (const asteroid of this.asteroids) {
       asteroid.body.x -= speed * dt;
+      asteroid.body.y += asteroid.velocityY * dt;
+      asteroid.body.y = Phaser.Math.Wrap(
+        asteroid.body.y,
+        -asteroid.radius,
+        HEIGHT + asteroid.radius,
+      );
       asteroid.body.rotation += asteroid.spin * dt;
       if (!asteroid.scored && asteroid.body.x + asteroid.radius < PLAYER_X) {
         asteroid.scored = true;
@@ -1464,6 +1471,10 @@ export class FlyScene extends Phaser.Scene {
       body,
       radius,
       spin: Phaser.Math.FloatBetween(-0.8, 0.8),
+      velocityY:
+        Phaser.Math.Between(0, 99) < 45
+          ? 0
+          : Phaser.Math.RND.pick([-1, 1]) * Phaser.Math.FloatBetween(7, 19),
       scored: false,
     });
   }
