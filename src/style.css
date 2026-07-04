@@ -491,7 +491,8 @@ button.primary:focus-visible {
   font-family: "Pixelify Sans", monospace;
 }
 
-.level-settings select {
+.level-settings select,
+.level-settings input {
   width: 100%;
   min-height: 2.6rem;
   padding: 0.45rem 0.6rem;

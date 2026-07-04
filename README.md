@@ -30,6 +30,8 @@ Outside the explicitly enabled Hill Climber terrain effect, the app only reads t
 
 Trainer gameplay maps sustained effort to a requested altitude: cruise returns toward center, harder pedaling moves the target upward, and easing moves it downward. A wider cruise-power deadband, softened partial effort, bounded movement speed, larger and slower gates, and a smaller collision box compensate for trainer flywheel momentum and reporting delay.
 
+Trainer setup also offers **Enter wattages manually**. Enter a sustainable cruise wattage and a controlled hard-effort wattage at least 30 W higher. Manual profiles use the same per-device local storage as guided calibration and can be replaced at any time.
+
 The lower-left ride display shows active run time as minutes and seconds, with accumulated session minutes in parentheses. Distance is integrated from trainer-reported speed and shown in kilometers for the current run and controller session. Countdown, menu, and paused time are excluded; choosing a new controller starts a new session.
 
 ### Ride history
@@ -38,7 +40,7 @@ The home-screen **Ride history** view stores completed and manually ended runs l
 
 ### Levels
 
-- **Ornithopter Run** is the original endless gate course, now backed by independently scrolling clouds, distant mountains, midground hills, and foreground villages.
+- **Ornithopter Run** is the original endless gate course, now backed by independently scrolling clouds, distant mountains, midground hills, and foreground fields.
 - **Asteroids** replaces the landscape with a moving starfield. Dodge incoming asteroids by pedaling higher or easing lower as the field accelerates.
 - **Racer** is a fixed-screen overhead circuit inspired by classic arcade sprint racing. Steering is automatic; harder pedaling accelerates and moves toward the outer racing line, while easing slows and moves inward. Cars can pass through one another without collision penalties, keeping overtaking focused on speed.
 - **Hill Climber** generates a finite mountain course with configurable distance, summit elevation, and slope character. The camera follows accumulated altitude, scenery progresses from lowlands through mountains and glaciers, and a minimap tracks the complete route. Uphill grades require additional watts to hold speed; downhills support coasting and reward pedaling.

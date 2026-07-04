@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import {
   createCalibration,
+  createManualCalibration,
   loadCalibration,
   median,
   percentile,
@@ -31,5 +32,14 @@ describe("calibration", () => {
     expect(() =>
       createCalibration("x", [100, 100, 100, 100, 100], [110, 115, 120, 125, 129]),
     ).toThrow("30 W");
+  });
+
+  it("creates and validates manually entered calibration", () => {
+    expect(createManualCalibration("trainer-1", 125.4, 280.2)).toMatchObject({
+      cruisePowerW: 125,
+      hardPowerW: 280,
+    });
+    expect(() => createManualCalibration("trainer-1", 120, 140)).toThrow("30 W");
+    expect(() => createManualCalibration("trainer-1", 0, 260)).toThrow("between 20 W");
   });
 });

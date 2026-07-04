@@ -1,5 +1,6 @@
 import {
   createCalibration,
+  createManualCalibration,
   loadCalibration,
   saveCalibration,
   type CalibrationProfile,
@@ -159,6 +160,10 @@ export class AppController {
       const { gradePercent } = (event as CustomEvent<{ gradePercent: number }>).detail;
       this.handleTerrainGrade(gradePercent);
     });
+    gameEvents.addEventListener("virtual-speed", (event) => {
+      if (this.gameActive && this.selectedLevel === "hill-climber")
+        this.speedValue.textContent = (event as CustomEvent<number>).detail.toFixed(1);
+    });
     gameEvents.addEventListener("signal-returned", () => {
       if (this.gameActive) this.showPause("Signal restored", "Resume when you are ready.");
     });
@@ -255,7 +260,9 @@ export class AppController {
       sample.powerW === undefined ? "—" : String(Math.max(0, sample.powerW));
     this.cadenceValue.textContent =
       sample.cadenceRpm === undefined ? "—" : sample.cadenceRpm.toFixed(0);
-    this.speedValue.textContent = sample.speedKph === undefined ? "—" : sample.speedKph.toFixed(1);
+    if (!this.gameActive || this.selectedLevel !== "hill-climber")
+      this.speedValue.textContent =
+        sample.speedKph === undefined ? "—" : sample.speedKph.toFixed(1);
     this.sampleCollector?.(sample);
     if (this.traceActive) {
       this.traceRecords.push({
@@ -484,6 +491,7 @@ export class AppController {
           ${calibrated ? '<button id="fly-button" class="primary">Start flight</button>' : '<button id="calibrate-button" class="primary">Calibrate effort</button>'}
           ${!demo && calibrated ? '<button id="trace-button">Guided trace</button>' : ""}
           ${!demo && calibrated ? '<button id="recalibrate-button">Recalibrate</button>' : ""}
+          ${!demo ? '<button id="manual-calibration-button">Enter wattages manually</button>' : ""}
           <button id="back-button">Back</button>
         </div>
       </section>`;
@@ -511,11 +519,57 @@ export class AppController {
       unsubscribe?.();
       void this.runCalibration();
     });
+    this.overlay.querySelector("#manual-calibration-button")?.addEventListener("click", () => {
+      unsubscribe?.();
+      this.showManualCalibration(status);
+    });
     this.overlay.querySelector("#back-button")?.addEventListener("click", () => {
       unsubscribe?.();
       void this.source?.disconnect();
       this.showHome();
     });
+  }
+
+  private showManualCalibration(status: ConnectionStatus, message?: string): void {
+    const cruise = this.profile?.cruisePowerW ?? 120;
+    const hard = this.profile?.hardPowerW ?? 260;
+    this.overlay.classList.remove("hidden", "compact");
+    this.overlay.innerHTML = `
+      <section class="panel small-panel" aria-labelledby="manual-calibration-title">
+        <p class="eyebrow">Trainer calibration</p>
+        <h2 id="manual-calibration-title">Enter wattages</h2>
+        <p>Enter a comfortable sustainable effort and a controlled hard effort. These values only affect game response.</p>
+        ${message ? `<p class="notice">${escapeHtml(message)}</p>` : ""}
+        <div class="level-settings">
+          <label for="manual-cruise">Cruise power (watts)</label>
+          <input id="manual-cruise" type="number" min="20" max="1970" step="1" value="${cruise}">
+          <label for="manual-hard">Hard power (watts)</label>
+          <input id="manual-hard" type="number" min="50" max="2000" step="1" value="${hard}">
+        </div>
+        <p class="fine-print">Hard power must be at least 30 W above cruise power.</p>
+        <div class="actions"><button id="save-manual-calibration" class="primary">Save calibration</button><button id="cancel-manual-calibration">Cancel</button></div>
+      </section>`;
+    this.overlay.querySelector("#save-manual-calibration")?.addEventListener("click", () => {
+      try {
+        if (!status.deviceId) throw new Error("The connected trainer has no device identifier.");
+        const profile = createManualCalibration(
+          status.deviceId,
+          Number(this.overlay.querySelector<HTMLInputElement>("#manual-cruise")!.value),
+          Number(this.overlay.querySelector<HTMLInputElement>("#manual-hard")!.value),
+        );
+        saveCalibration(profile);
+        this.profile = profile;
+        this.showTrainerReady(status);
+      } catch (error) {
+        this.showManualCalibration(
+          status,
+          error instanceof Error ? error.message : "Calibration could not be saved.",
+        );
+      }
+    });
+    this.overlay
+      .querySelector("#cancel-manual-calibration")
+      ?.addEventListener("click", () => this.showTrainerReady(status));
   }
 
   private trainerLoadMarkup(): string {

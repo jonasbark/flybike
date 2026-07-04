@@ -81,7 +81,7 @@ const PITCH_STEP = Phaser.Math.DegToRad(2);
 const HILL_PLAYER_X = 76;
 const HILL_WORLD_UNITS_PER_KM = 500;
 const DRAGON_RUN_SECONDS = 5 * 60;
-const DRAGON_RING_COLLECTION_SCALE = 2;
+const DRAGON_RING_COLLECTION_SCALE = 1.5;
 const RACER_TRACKS = {
   "meadow-circuit": [
     { x: 55, y: 143 },
@@ -209,6 +209,7 @@ export class FlyScene extends Phaser.Scene {
   private hillDistance = 0;
   private hillDistanceKm = 0;
   private hillSpeed = 0;
+  private displayedHillSpeed = -1;
   private hillCameraElevation = 0;
   private hillCourse: HillCourse = generateHillCourse(5, 1000, "mixed", 1);
   private hillHardPowerW = 260;
@@ -534,6 +535,11 @@ export class FlyScene extends Phaser.Scene {
       this.hillDistanceKm + (this.hillSpeed * dt) / 3600,
     );
     this.hillDistance = this.hillDistanceKm * HILL_WORLD_UNITS_PER_KM;
+    const displaySpeed = Math.round(this.hillSpeed * 10) / 10;
+    if (displaySpeed !== this.displayedHillSpeed) {
+      this.displayedHillSpeed = displaySpeed;
+      emitGameEvent("virtual-speed", displaySpeed);
+    }
 
     const currentScore = Math.floor(this.hillDistanceKm);
     if (currentScore > this.score) {
@@ -809,13 +815,6 @@ export class FlyScene extends Phaser.Scene {
       }
       foreground.add(this.add.rectangle(tileX + WIDTH / 2, 163, WIDTH, 34, 0xa5a66a));
       foreground.add(this.add.rectangle(tileX + WIDTH / 2, 151, WIDTH, 4, 0xd3b36e));
-      for (let index = 0; index < 12; index += 1) {
-        const x = tileX + index * 29;
-        const height = 17 + (index % 4) * 3;
-        foreground.add(this.add.rectangle(x, 165 - height / 2, 18, height, 0x67513c));
-        foreground.add(this.add.rectangle(x, 153, 21, 3, 0xd8b76e));
-        foreground.add(this.add.rectangle(x - 4, 160, 2, 3, 0xf0d28b, 0.7));
-      }
     }
     this.skyParallaxLayers = [
       { container: farMountains, speed: 1.8 },
@@ -1333,6 +1332,7 @@ export class FlyScene extends Phaser.Scene {
     this.hillDistance = 0;
     this.hillDistanceKm = 0;
     this.hillSpeed = 0;
+    this.displayedHillSpeed = -1;
     this.hillHardPowerW = profile.hardPowerW;
     this.lastTerrainGradeAt = 0;
     this.hillCourse = generateHillCourse(

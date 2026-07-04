@@ -38,6 +38,27 @@ export function createCalibration(
   return { deviceId, cruisePowerW, hardPowerW, calibratedAt: new Date().toISOString() };
 }
 
+export function createManualCalibration(
+  deviceId: string,
+  cruisePowerW: number,
+  hardPowerW: number,
+): CalibrationProfile {
+  const cruise = Math.round(cruisePowerW);
+  const hard = Math.round(hardPowerW);
+  if (!Number.isFinite(cruise) || !Number.isFinite(hard) || cruise < 20 || hard > 2000) {
+    throw new Error("Enter wattages between 20 W and 2000 W.");
+  }
+  if (hard - cruise < 30) {
+    throw new Error("Hard effort must be at least 30 W above cruise effort.");
+  }
+  return {
+    deviceId,
+    cruisePowerW: cruise,
+    hardPowerW: hard,
+    calibratedAt: new Date().toISOString(),
+  };
+}
+
 export function loadCalibration(deviceId: string): CalibrationProfile | undefined {
   try {
     const profiles = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "{}") as Record<
